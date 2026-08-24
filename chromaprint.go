@@ -13,12 +13,18 @@ import (
 	"github.com/alexgorbatchev/gochromaprint/internal/fft"
 )
 
-// Version constants for the chromaprint library.
+// Version constants for the gochromaprint library.
+//
+// Versioning Policy:
+// Major.Minor tracks the upstream Chromaprint version (e.g. 1.6).
+// Patch is the gochromaprint library release version (e.g. 1.6.0).
 const (
-	VersionMajor = 1
-	VersionMinor = 6
-	VersionPatch = 1
-	Version      = "1.6.1"
+	UpstreamVersionMajor = 1
+	UpstreamVersionMinor = 6
+	VersionMajor         = 1
+	VersionMinor         = 6
+	VersionPatch         = 0
+	Version              = "1.6.0"
 )
 
 // Algorithm specifies the chromaprint fingerprinting algorithm version.

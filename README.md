@@ -143,6 +143,15 @@ fpcalc --plain audio.wav
 
 ---
 
+## Versioning Policy
+
+`gochromaprint` version numbers follow SemVer with upstream synchronization:
+
+- **`Major.Minor`** (`1.6.x`): Directly tracks the upstream [Chromaprint](https://github.com/acoustid/chromaprint) `Major.Minor` release version to ensure algorithm and compatibility parity.
+- **`Patch`** (`1.6.0`, `1.6.1`, ...): Represents the `gochromaprint` Go library release version for bug fixes, performance optimizations, and pure Go tooling enhancements built against that upstream version baseline.
+
+---
+
 ## Development
 
 Use `just` to run recipes:
