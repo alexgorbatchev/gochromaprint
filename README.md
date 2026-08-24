@@ -15,14 +15,32 @@ A pure Go port of [Chromaprint](https://acoustid.org/chromaprint), the audio fin
 
 ## Installation
 
+### Go Library
+
 ```bash
 go get github.com/alexgorbatchev/gochromaprint
 ```
 
-To install the `fpcalc` CLI:
+### `fpcalc` CLI
+
+`fpcalc` is a **100% drop-in replacement** for the upstream C++ `fpcalc` utility, accepting identical flags and arguments.
+
+#### Pre-built Binaries (GitHub Releases)
+
+Download pre-built binaries for macOS (Darwin), Linux, or Windows (amd64 / arm64) directly from the [GitHub Releases](https://github.com/alexgorbatchev/gochromaprint/releases) page:
 
 ```bash
+# Using GitHub CLI
+gh release download -R alexgorbatchev/gochromaprint --pattern "*darwin_arm64.tar.gz"
+
+# Or install / update via Go toolchain
 go install github.com/alexgorbatchev/gochromaprint/cmd/fpcalc@latest
+```
+
+Once installed, `fpcalc` can also self-upgrade to the latest release in-place:
+
+```bash
+fpcalc -upgrade
 ```
 
 ---
@@ -113,6 +131,8 @@ for _, seg := range segments {
 ---
 
 ## `fpcalc` CLI
+
+`fpcalc` is a **drop-in replacement** for the official Chromaprint `fpcalc` tool with support for single-dash (`-rate`, `-channels`, `-length`) and double-dash (`--rate`, `--json`) arguments, WAV containers, raw PCM streams, and automatic self-updates:
 
 ```bash
 # Generate fingerprint from a WAV or raw PCM audio file
