@@ -109,4 +109,50 @@ func TestReadWAVErrors(t *testing.T) {
 	if _, err := audio.ReadWAV(bytes.NewReader([]byte("RIFF"))); err == nil {
 		t.Fatal("expected error for truncated header")
 	}
+
+	// Non-PCM format
+	bufNonPCM := &bytes.Buffer{}
+	bufNonPCM.WriteString("RIFF")
+	_ = binary.Write(bufNonPCM, binary.LittleEndian, uint32(50))
+	bufNonPCM.WriteString("WAVE")
+	bufNonPCM.WriteString("fmt ")
+	_ = binary.Write(bufNonPCM, binary.LittleEndian, uint32(16))
+	_ = binary.Write(bufNonPCM, binary.LittleEndian, uint16(3)) // IEEE float
+	_ = binary.Write(bufNonPCM, binary.LittleEndian, uint16(2))
+	_ = binary.Write(bufNonPCM, binary.LittleEndian, uint32(44100))
+	_ = binary.Write(bufNonPCM, binary.LittleEndian, uint32(176400))
+	_ = binary.Write(bufNonPCM, binary.LittleEndian, uint16(4))
+	_ = binary.Write(bufNonPCM, binary.LittleEndian, uint16(16))
+	if _, err := audio.ReadWAV(bufNonPCM); err == nil {
+		t.Fatal("expected error for non-PCM")
+	}
+
+	// Non-16 bit depth
+	buf24 := &bytes.Buffer{}
+	buf24.WriteString("RIFF")
+	_ = binary.Write(buf24, binary.LittleEndian, uint32(50))
+	buf24.WriteString("WAVE")
+	buf24.WriteString("fmt ")
+	_ = binary.Write(buf24, binary.LittleEndian, uint32(16))
+	_ = binary.Write(buf24, binary.LittleEndian, uint16(1))
+	_ = binary.Write(buf24, binary.LittleEndian, uint16(2))
+	_ = binary.Write(buf24, binary.LittleEndian, uint32(44100))
+	_ = binary.Write(buf24, binary.LittleEndian, uint32(264600))
+	_ = binary.Write(buf24, binary.LittleEndian, uint16(6))
+	_ = binary.Write(buf24, binary.LittleEndian, uint16(24)) // 24-bit
+	if _, err := audio.ReadWAV(buf24); err == nil {
+		t.Fatal("expected error for 24-bit")
+	}
+
+	// fmt chunk too small
+	bufSmallFmt := &bytes.Buffer{}
+	bufSmallFmt.WriteString("RIFF")
+	_ = binary.Write(bufSmallFmt, binary.LittleEndian, uint32(30))
+	bufSmallFmt.WriteString("WAVE")
+	bufSmallFmt.WriteString("fmt ")
+	_ = binary.Write(bufSmallFmt, binary.LittleEndian, uint32(8))
+	bufSmallFmt.WriteString("12345678")
+	if _, err := audio.ReadWAV(bufSmallFmt); err == nil {
+		t.Fatal("expected error for small fmt chunk")
+	}
 }

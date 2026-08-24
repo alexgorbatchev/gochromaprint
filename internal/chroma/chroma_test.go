@@ -21,6 +21,10 @@ func (c *vectorCollector) Consume(features []float64) {
 func TestChromaNormalA(t *testing.T) {
 	col := &vectorCollector{}
 	e := chroma.NewExtractor(10, 510, 256, 1000, col)
+	if e.Interpolate() {
+		t.Fatal("expected Interpolate() to be false initially")
+	}
+	e.Reset()
 	frame := make([]float64, 128)
 	frame[113] = 1.0
 	e.Consume(frame)
@@ -76,6 +80,9 @@ func TestChromaInterpolatedB(t *testing.T) {
 	col := &vectorCollector{}
 	e := chroma.NewExtractor(10, 510, 256, 1000, col)
 	e.SetInterpolate(true)
+	if !e.Interpolate() {
+		t.Fatal("expected Interpolate() to be true")
+	}
 	frame := make([]float64, 128)
 	frame[64] = 1.0
 	e.Consume(frame)
@@ -129,9 +136,21 @@ func TestChromaInterpolatedGSharp(t *testing.T) {
 	}
 }
 
+func TestChromaConsumerFunc(t *testing.T) {
+	consumed := false
+	fn := chroma.ConsumerFunc(func(features []float64) {
+		consumed = true
+	})
+	fn.Consume([]float64{1, 2, 3})
+	if !consumed {
+		t.Fatal("expected ConsumerFunc to be called")
+	}
+}
+
 func TestChromaFilterBlur2(t *testing.T) {
 	col := &vectorCollector{}
 	filter := chroma.NewFilter([]float64{0.5, 0.5}, col)
+	filter.Reset()
 	d1 := []float64{0.0, 5.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	d2 := []float64{1.0, 6.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	d3 := []float64{2.0, 7.0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
@@ -215,6 +234,7 @@ func TestChromaResampler(t *testing.T) {
 func TestChromaNormalizer(t *testing.T) {
 	col := &vectorCollector{}
 	norm := chroma.NewNormalizer(col)
+	norm.Reset()
 
 	// Below threshold (norm < 0.01)
 	norm.Consume([]float64{0.001, 0.001, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0})

@@ -101,6 +101,12 @@ func TestAllAlgorithmsEndToEnd(t *testing.T) {
 	for _, algo := range algos {
 		t.Run(fmt.Sprintf("Algo_%d", algo), func(t *testing.T) {
 			ctx := gochromaprint.New(algo)
+			if ctx.Algorithm() != algo {
+				t.Fatalf("Algorithm = %d, want %d", ctx.Algorithm(), algo)
+			}
+			if ctx.Config().SampleRate != 11025 {
+				t.Fatalf("Config.SampleRate = %d, want 11025", ctx.Config().SampleRate)
+			}
 			if err := ctx.Start(44100, 1); err != nil {
 				t.Fatalf("Start failed: %v", err)
 			}
@@ -350,6 +356,14 @@ func TestDecodeFingerprintHeaders(t *testing.T) {
 	if sz2 != 19 || algo2 != 1 {
 		t.Fatalf("sz2 = %d, algo2 = %d, want 19, 1", sz2, algo2)
 	}
+
+	// Invalid header tests
+	if _, _, err := gochromaprint.DecodeFingerprintHeader([]byte{1, 2}, false); err == nil {
+		t.Fatal("expected error for short header")
+	}
+	if _, _, err := gochromaprint.DecodeFingerprintHeader([]byte("invalid!!"), true); err == nil {
+		t.Fatal("expected error for invalid base64")
+	}
 }
 
 func TestContextAlgorithmMetadata(t *testing.T) {
@@ -387,6 +401,12 @@ func TestContextLifecycleErrors(t *testing.T) {
 	ctx4 := gochromaprint.New(gochromaprint.AlgorithmTest4)
 	if err := ctx4.SetOption("silence_threshold", 80); err != nil {
 		t.Fatalf("unexpected error setting silence_threshold: %v", err)
+	}
+
+	// Unknown algorithm fallback
+	ctxFallback := gochromaprint.New(gochromaprint.Algorithm(999))
+	if ctxFallback.Algorithm() != gochromaprint.AlgorithmDefault {
+		t.Fatalf("expected default algorithm fallback, got %d", ctxFallback.Algorithm())
 	}
 }
 

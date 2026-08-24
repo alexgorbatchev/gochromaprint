@@ -63,6 +63,13 @@ func TestSilenceRemoverPassThrough(t *testing.T) {
 	if !sr.Reset(1) {
 		t.Fatal("Reset failed")
 	}
+	if sr.Reset(2) {
+		t.Fatal("expected Reset(2) to fail for stereo")
+	}
+	sr.SetThreshold(10)
+	if sr.Threshold() != 10 {
+		t.Fatalf("Threshold = %d, want 10", sr.Threshold())
+	}
 	sr.Consume(samples)
 	sr.Flush()
 
@@ -92,9 +99,31 @@ func TestAudioProcessorPassThrough(t *testing.T) {
 	data := loadAudioFile(t, "test_mono_44100.raw")
 	buf := &sampleBuffer{}
 	proc := audio.NewProcessor(44100, buf)
+	if proc.TargetSampleRate() != 44100 {
+		t.Fatalf("TargetSampleRate = %d, want 44100", proc.TargetSampleRate())
+	}
+	proc.SetTargetSampleRate(11025)
+	if proc.TargetSampleRate() != 11025 {
+		t.Fatalf("TargetSampleRate = %d, want 11025", proc.TargetSampleRate())
+	}
+	proc.SetConsumer(buf)
+
 	if err := proc.Reset(44100, 1); err != nil {
 		t.Fatal(err)
 	}
+	if err := proc.Reset(0, 1); err != audio.ErrInvalidSampleRate {
+		t.Fatal("expected ErrInvalidSampleRate")
+	}
+	if err := proc.Reset(44100, 0); err != audio.ErrInvalidChannels {
+		t.Fatal("expected ErrInvalidChannels")
+	}
+	if err := proc.Reset(500, 1); err != audio.ErrInvalidSampleRate {
+		t.Fatal("expected ErrInvalidSampleRate")
+	}
+
+	_ = proc.Reset(44100, 1)
+	proc.SetTargetSampleRate(44100)
+	_ = proc.Reset(44100, 1)
 	proc.Consume(data)
 	proc.Flush()
 
@@ -127,6 +156,26 @@ func TestAudioProcessorStereoToMono(t *testing.T) {
 		if buf.data[i] != data2[i] {
 			t.Fatalf("diff at %d: got %d, want %d", i, buf.data[i], data2[i])
 		}
+	}
+}
+
+func TestAudioProcessorMultiChannel(t *testing.T) {
+	// 4-channel input
+	input := []int16{
+		10, 20, 30, 40, // avg = 25
+		100, 200, 300, 400, // avg = 250
+	}
+	buf := &sampleBuffer{}
+	proc := audio.NewProcessor(44100, buf)
+	if err := proc.Reset(44100, 4); err != nil {
+		t.Fatal(err)
+	}
+	proc.Consume(input)
+	proc.Flush()
+
+	expected := []int16{25, 250}
+	if !reflect.DeepEqual(buf.data, expected) {
+		t.Fatalf("got %v, want %v", buf.data, expected)
 	}
 }
 
@@ -228,5 +277,32 @@ func TestAudioProcessorChunkedConsume(t *testing.T) {
 				t.Fatalf("chunkSize %d diff at %d: got %d, want %d", chunkSize, i, buf.data[i], expected.data[i])
 			}
 		}
+	}
+}
+
+func TestAudioSlicer(t *testing.T) {
+	frames := 0
+	slicer := audio.NewSlicer(10, 5, func(b1, b2 []int16) {
+		frames++
+		if len(b1)+len(b2) != 10 {
+			t.Fatalf("frame size = %d, want 10", len(b1)+len(b2))
+		}
+	})
+
+	input := make([]int16, 25)
+	slicer.Process(input)
+	if frames != 4 {
+		t.Fatalf("expected 4 frames, got %d", frames)
+	}
+
+	slicer.Reset()
+	frames = 0
+	slicer.Process(input[:8])
+	if frames != 0 {
+		t.Fatalf("expected 0 frames for sub-size input, got %d", frames)
+	}
+	slicer.Process(input[8:15])
+	if frames != 2 {
+		t.Fatalf("expected 2 frames after second chunk, got %d", frames)
 	}
 }

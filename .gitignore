@@ -3,3 +3,5 @@ bin/
 .tmp/
 .workspaces/
 .codegraph
+*.out
+*.test

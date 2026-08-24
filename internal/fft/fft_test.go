@@ -27,6 +27,9 @@ func TestFFTAccuracy(t *testing.T) {
 	frameSizes := []int{64, 128, 512, 4096}
 	for _, size := range frameSizes {
 		f := fft.New(size)
+		if f.FrameSize() != size {
+			t.Fatalf("FrameSize = %d, want %d", f.FrameSize(), size)
+		}
 		in := make([]float64, size)
 		for i := 0; i < size; i++ {
 			in[i] = math.Sin(2*math.Pi*float64(i)*5/float64(size)) + 0.5*math.Cos(2*math.Pi*float64(i)*13/float64(size))
@@ -49,4 +52,13 @@ func TestFFTAccuracy(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestFFTInvalidSize(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic on non-power-of-2 size")
+		}
+	}()
+	fft.New(100)
 }

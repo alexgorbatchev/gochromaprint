@@ -3,12 +3,45 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func createTestWAV(channels, sampleRate int, durationSecs float64) []byte {
+	numSamples := int(float64(channels*sampleRate) * durationSecs)
+	samples := make([]int16, numSamples)
+	for i := range samples {
+		samples[i] = int16(i * 10)
+	}
+
+	buf := &bytes.Buffer{}
+	buf.WriteString("RIFF")
+	dataSize := uint32(len(samples) * 2)
+	fileSize := uint32(36 + dataSize)
+	_ = binary.Write(buf, binary.LittleEndian, fileSize)
+	buf.WriteString("WAVE")
+
+	buf.WriteString("fmt ")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(16))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(channels))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(sampleRate*channels*2))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(channels*2))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(16))
+
+	buf.WriteString("data")
+	_ = binary.Write(buf, binary.LittleEndian, dataSize)
+	for _, s := range samples {
+		_ = binary.Write(buf, binary.LittleEndian, s)
+	}
+	return buf.Bytes()
+}
 
 func TestNormalizeArgs(t *testing.T) {
 	in := []string{"-rate", "44100", "-channels", "2", "-length", "60", "-json", "-overlap", "-upgrade", "file.wav"}
@@ -70,6 +103,54 @@ func TestCLIProcessFile(t *testing.T) {
 		}
 	})
 
+	t.Run("RawSignedJSON", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, raw: true, signed: true, jsonOutput: true}
+		if err := processFile(testFile, opts, true, buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, `"duration":4`) || !strings.Contains(out, `"fingerprint":[-554577065`) {
+			t.Fatalf("unexpected raw signed JSON output: %q", out)
+		}
+	})
+
+	t.Run("RawUnsignedJSON", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, raw: true, jsonOutput: true}
+		if err := processFile(testFile, opts, true, buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, `"duration":4`) || !strings.Contains(out, `"fingerprint":[3740390231`) {
+			t.Fatalf("unexpected raw unsigned JSON output: %q", out)
+		}
+	})
+
+	t.Run("TimestampOutput", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, ts: true}
+		if err := processFile(testFile, opts, true, buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "TIMESTAMP=") {
+			t.Fatalf("expected TIMESTAMP= in output: %q", out)
+		}
+	})
+
+	t.Run("SecondFileSpacing", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2}
+		if err := processFile(testFile, opts, false, buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.HasPrefix(out, "\n") {
+			t.Fatalf("expected leading newline for subsequent files: %q", out)
+		}
+	})
+
 	t.Run("ChunkMode", func(t *testing.T) {
 		buf := &bytes.Buffer{}
 		opts := &cliOptions{channels: 1, rate: 44100, length: 120, chunk: 3.0, algorithm: 2, textOutput: true}
@@ -79,6 +160,18 @@ func TestCLIProcessFile(t *testing.T) {
 		out := buf.String()
 		if !strings.Contains(out, "DURATION=3\n") {
 			t.Fatalf("expected chunk duration 3 in output: %q", out)
+		}
+	})
+
+	t.Run("ChunkModeWithOverlapAndTS", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		opts := &cliOptions{channels: 1, rate: 44100, length: 120, chunk: 3.0, overlap: true, ts: true, algorithm: 2, textOutput: true}
+		if err := processFile(testFile, opts, true, buf); err != nil {
+			t.Fatal(err)
+		}
+		out := buf.String()
+		if !strings.Contains(out, "TIMESTAMP=") {
+			t.Fatalf("expected TIMESTAMP in chunk output: %q", out)
 		}
 	})
 
@@ -97,6 +190,31 @@ func TestCLIProcessFile(t *testing.T) {
 			t.Fatal("expected error for invalid format")
 		}
 	})
+
+	t.Run("NonExistentFile", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2}
+		if err := processFile("nonexistent-file.raw", opts, true, buf); err == nil {
+			t.Fatal("expected error for non-existent file")
+		}
+	})
+}
+
+func TestReadAudioWAV(t *testing.T) {
+	wavData := createTestWAV(1, 11025, 5.0)
+	tmpPath := filepath.Join(t.TempDir(), "test.wav")
+	if err := os.WriteFile(tmpPath, wavData, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := &bytes.Buffer{}
+	opts := &cliOptions{length: 4.0, algorithm: 2}
+	if err := processFile(tmpPath, opts, true, buf); err != nil {
+		t.Fatalf("failed to process WAV file: %v", err)
+	}
+	if !strings.Contains(buf.String(), "DURATION=4\n") {
+		t.Fatalf("expected DURATION=4 in output: %q", buf.String())
+	}
 }
 
 func TestUpgradeFlag(t *testing.T) {
@@ -138,4 +256,35 @@ func TestUpgradeFlag(t *testing.T) {
 			t.Fatal("expected error on upgrade failure")
 		}
 	})
+}
+
+func TestStdinReading(t *testing.T) {
+	testData, err := os.ReadFile(filepath.Join("..", "..", "testdata", "test_stereo_44100.raw"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = r.Close() }()
+
+	go func() {
+		defer func() { _ = w.Close() }()
+		_, _ = w.Write(testData)
+	}()
+
+	origStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = origStdin }()
+
+	buf := &bytes.Buffer{}
+	opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2}
+	if err := processFile("-", opts, true, buf); err != nil {
+		t.Fatalf("failed reading stdin: %v", err)
+	}
+	if !strings.Contains(buf.String(), "FINGERPRINT=") {
+		t.Fatalf("unexpected stdin output: %q", buf.String())
+	}
 }

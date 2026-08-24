@@ -1,6 +1,7 @@
 package gochromaprint_test
 
 import (
+	"math"
 	"testing"
 
 	"github.com/alexgorbatchev/gochromaprint"
@@ -81,6 +82,14 @@ func TestFingerprintMatcher(t *testing.T) {
 	}
 
 	matcher := gochromaprint.NewMatcher(classifier.NewConfigTest2())
+	matcher.SetMatchThreshold(10.0)
+	if matcher.MatchThreshold() != 10.0 {
+		t.Fatalf("MatchThreshold = %g, want 10.0", matcher.MatchThreshold())
+	}
+	if matcher.HashTime(10) <= 0 || matcher.HashDuration(10) <= 0 {
+		t.Fatal("expected positive hash time and duration")
+	}
+
 	segments, err := matcher.Match(fp1, fp2)
 	if err != nil {
 		t.Fatalf("Match failed: %v", err)
@@ -88,8 +97,29 @@ func TestFingerprintMatcher(t *testing.T) {
 	if len(segments) == 0 {
 		t.Fatal("expected matching segments, got 0")
 	}
+	if segments[0].PublicScore() <= 0 {
+		t.Fatalf("expected positive public score, got %d", segments[0].PublicScore())
+	}
 	if segments[0].SimilarityPercent() < 80.0 {
 		t.Fatalf("expected high similarity percent, got %g", segments[0].SimilarityPercent())
+	}
+
+	// Test Merged helper
+	s1 := gochromaprint.Segment{Pos1: 0, Pos2: 0, Duration: 10, Score: 2.0}
+	s2 := gochromaprint.Segment{Pos1: 10, Pos2: 10, Duration: 10, Score: 4.0}
+	merged := s1.Merged(s2)
+	if merged.Duration != 20 || math.Abs(merged.Score-3.0) > 1e-6 {
+		t.Fatalf("unexpected merged segment: %+v", merged)
+	}
+
+	// SimilarityPercent bounds checks
+	sNeg := gochromaprint.Segment{Score: 50.0}
+	if sNeg.SimilarityPercent() != 0 {
+		t.Fatalf("expected 0 similarity for large score, got %g", sNeg.SimilarityPercent())
+	}
+	sZero := gochromaprint.Segment{Score: 0.0}
+	if sZero.SimilarityPercent() != 100 {
+		t.Fatalf("expected 100 similarity for score 0, got %g", sZero.SimilarityPercent())
 	}
 
 	// Exact match with self

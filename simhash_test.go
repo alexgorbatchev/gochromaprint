@@ -10,6 +10,21 @@ func TestSimHashEmpty(t *testing.T) {
 	if got := gochromaprint.SimHash(nil); got != 0 {
 		t.Fatalf("SimHash(nil) = %d, want 0", got)
 	}
+	if got := gochromaprint.HashFingerprint(nil); got != 0 {
+		t.Fatalf("HashFingerprint(nil) = %d, want 0", got)
+	}
+}
+
+func TestCountSetBitsAndHamming(t *testing.T) {
+	if gochromaprint.CountSetBits(0) != 0 {
+		t.Fatal("CountSetBits(0) != 0")
+	}
+	if gochromaprint.CountSetBits(0xFF) != 8 {
+		t.Fatal("CountSetBits(0xFF) != 8")
+	}
+	if gochromaprint.HammingDistance(0b1010, 0b0011) != 2 {
+		t.Fatal("HammingDistance(1010, 0011) != 2")
+	}
 }
 
 func TestSimHashNormal(t *testing.T) {

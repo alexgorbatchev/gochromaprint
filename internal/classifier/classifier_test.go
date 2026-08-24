@@ -39,6 +39,13 @@ func TestFilter0(t *testing.T) {
 	img.AddRow(data[0])
 	img.AddRow(data[1])
 
+	if img.NumColumns() != 2 {
+		t.Fatalf("NumColumns = %d, want 2", img.NumColumns())
+	}
+	if img.NumRows() != 2 {
+		t.Fatalf("NumRows = %d, want 2", img.NumRows())
+	}
+
 	flt1 := classifier.Filter{Type: 0, Y: 0, Height: 1, Width: 1}
 	res0 := flt1.Apply(img, 0)
 	if math.Abs(res0-0.0) > 1e-6 {
@@ -48,6 +55,11 @@ func TestFilter0(t *testing.T) {
 	res1 := flt1.Apply(img, 1)
 	if math.Abs(res1-1.0986123) > 1e-6 {
 		t.Fatalf("Apply(1) = %g, want 1.0986123", res1)
+	}
+
+	img.Reset()
+	if img.NumRows() != 0 {
+		t.Fatalf("NumRows after Reset = %d, want 0", img.NumRows())
 	}
 }
 
@@ -62,6 +74,10 @@ func TestFilterTypes(t *testing.T) {
 	img.AddRow(data[3:6])
 	img.AddRow(data[6:9])
 
+	if classifier.Subtract(5.0, 3.0) != 2.0 {
+		t.Fatal("Subtract(5, 3) != 2")
+	}
+
 	// Filter0
 	f0 := classifier.Filter{Type: 0, Y: 0, Height: 2, Width: 2}
 	val0 := f0.Apply(img, 0)
@@ -72,8 +88,6 @@ func TestFilterTypes(t *testing.T) {
 	// Filter1
 	f1 := classifier.Filter{Type: 1, Y: 0, Height: 2, Width: 2}
 	val1 := f1.Apply(img, 0)
-	// top row (0..1) sum: 1+3=4; bottom row (1..2) sum: 2+4=6
-	// SubtractLog(6, 4) = log(7/5)
 	if math.Abs(val1-math.Log(7.0/5.0)) > 1e-6 {
 		t.Fatalf("Filter1: got %g, want %g", val1, math.Log(7.0/5.0))
 	}
@@ -81,8 +95,6 @@ func TestFilterTypes(t *testing.T) {
 	// Filter2
 	f2 := classifier.Filter{Type: 2, Y: 0, Height: 2, Width: 2}
 	val2 := f2.Apply(img, 0)
-	// left col (0..1) sum: 3+4=7; right col (1..2) sum: 1+2=3
-	// SubtractLog(7, 3) = log(8/4) = log(2)
 	if math.Abs(val2-math.Log(2.0)) > 1e-6 {
 		t.Fatalf("Filter2: got %g, want %g", val2, math.Log(2.0))
 	}
@@ -90,9 +102,6 @@ func TestFilterTypes(t *testing.T) {
 	// Filter3
 	f3 := classifier.Filter{Type: 3, Y: 0, Height: 2, Width: 2}
 	val3 := f3.Apply(img, 0)
-	// a = bottom-left(3) + top-right(2) = 5
-	// b = top-left(1) + bottom-right(4) = 5
-	// SubtractLog(5, 5) = 0
 	if math.Abs(val3-0.0) > 1e-6 {
 		t.Fatalf("Filter3: got %g, want 0", val3)
 	}
@@ -109,5 +118,30 @@ func TestFilterTypes(t *testing.T) {
 	val5 := f5.Apply(img, 0)
 	if val5 == 0.0 {
 		t.Fatalf("Filter5: unexpected 0.0")
+	}
+
+	// Invalid filter type returns 0.0
+	fInvalid := classifier.Filter{Type: 99, Y: 0, Height: 1, Width: 1}
+	if fInvalid.Apply(img, 0) != 0.0 {
+		t.Fatal("expected 0.0 for invalid filter type")
+	}
+}
+
+func TestImage(t *testing.T) {
+	img := classifier.NewImage(3)
+	if img.NumRows() != 0 {
+		t.Fatalf("NumRows = %d, want 0", img.NumRows())
+	}
+	img.AddRow([]float64{1, 2, 3})
+	img.AddRow([]float64{4, 5, 6})
+	if img.NumRows() != 2 {
+		t.Fatalf("NumRows = %d, want 2", img.NumRows())
+	}
+	if img.Row(1)[0] != 4.0 {
+		t.Fatalf("Row(1)[0] = %g, want 4.0", img.Row(1)[0])
+	}
+	img0 := classifier.NewImage(0)
+	if img0.NumRows() != 0 {
+		t.Fatalf("img0.NumRows() = %d, want 0", img0.NumRows())
 	}
 }
