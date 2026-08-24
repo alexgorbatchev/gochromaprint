@@ -57,4 +57,20 @@ func TestCLIProcessFile(t *testing.T) {
 			t.Fatalf("unexpected raw signed output: %q", out)
 		}
 	})
+
+	t.Run("InvalidAlgorithm", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 99}
+		if err := processFile(testFile, opts, buf); err == nil {
+			t.Fatal("expected error for invalid algorithm")
+		}
+	})
+
+	t.Run("InvalidFormat", func(t *testing.T) {
+		buf := &bytes.Buffer{}
+		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, format: "xml"}
+		if err := processFile(testFile, opts, buf); err == nil {
+			t.Fatal("expected error for invalid format")
+		}
+	})
 }

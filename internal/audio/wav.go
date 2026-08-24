@@ -47,6 +47,9 @@ func ReadWAV(r io.Reader) (*WAVInfo, error) {
 		chunkID := string(chunkHeader[0:4])
 		chunkSize := binary.LittleEndian.Uint32(chunkHeader[4:8])
 
+		// Calculate total bytes including 2-byte word alignment pad for odd chunk sizes
+		padSize := int64(chunkSize & 1)
+
 		switch chunkID {
 		case "fmt ":
 			fmtData := make([]byte, chunkSize)
@@ -69,6 +72,12 @@ func ReadWAV(r io.Reader) (*WAVInfo, error) {
 				return nil, fmt.Errorf("%w: unsupported bits per sample %d (only 16-bit supported)", ErrInvalidWAV, bitsPerSample)
 			}
 
+			if padSize > 0 {
+				if _, err := io.CopyN(io.Discard, r, padSize); err != nil && !errors.Is(err, io.EOF) {
+					return nil, fmt.Errorf("%w: skipping fmt chunk padding: %v", ErrInvalidWAV, err)
+				}
+			}
+
 		case "data":
 			dataBytes := make([]byte, chunkSize)
 			if _, err := io.ReadFull(r, dataBytes); err != nil {
@@ -81,9 +90,15 @@ func ReadWAV(r io.Reader) (*WAVInfo, error) {
 				samples[i] = int16(binary.LittleEndian.Uint16(dataBytes[i*2:]))
 			}
 
+			if padSize > 0 {
+				if _, err := io.CopyN(io.Discard, r, padSize); err != nil && !errors.Is(err, io.EOF) {
+					return nil, fmt.Errorf("%w: skipping data chunk padding: %v", ErrInvalidWAV, err)
+				}
+			}
+
 		default:
-			// Skip unknown chunk
-			if _, err := io.CopyN(io.Discard, r, int64(chunkSize)); err != nil {
+			// Skip unknown chunk and its alignment padding byte
+			if _, err := io.CopyN(io.Discard, r, int64(chunkSize)+padSize); err != nil {
 				return nil, fmt.Errorf("%w: skipping chunk %s: %v", ErrInvalidWAV, chunkID, err)
 			}
 		}

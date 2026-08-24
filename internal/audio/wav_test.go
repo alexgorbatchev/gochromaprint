@@ -59,3 +59,54 @@ func TestReadWAV(t *testing.T) {
 		t.Fatalf("samples = %v, want %v", info.Samples, samples)
 	}
 }
+
+func TestReadWAVOddMetadataChunk(t *testing.T) {
+	buf := &bytes.Buffer{}
+	buf.WriteString("RIFF")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(100))
+	buf.WriteString("WAVE")
+
+	// fmt chunk
+	buf.WriteString("fmt ")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(16))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(1))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(44100))
+	_ = binary.Write(buf, binary.LittleEndian, uint32(88200))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(2))
+	_ = binary.Write(buf, binary.LittleEndian, uint16(16))
+
+	// Odd-sized metadata chunk (e.g. 5 bytes + 1 pad byte)
+	buf.WriteString("INFO")
+	_ = binary.Write(buf, binary.LittleEndian, uint32(5))
+	buf.WriteString("hello")
+	buf.WriteByte(0) // padding byte per RIFF spec
+
+	// data chunk
+	buf.WriteString("data")
+	samples := []int16{111, 222, 333}
+	_ = binary.Write(buf, binary.LittleEndian, uint32(len(samples)*2))
+	for _, s := range samples {
+		_ = binary.Write(buf, binary.LittleEndian, s)
+	}
+
+	info, err := audio.ReadWAV(buf)
+	if err != nil {
+		t.Fatalf("ReadWAV failed on odd chunk: %v", err)
+	}
+	if !reflect.DeepEqual(info.Samples, samples) {
+		t.Fatalf("samples = %v, want %v", info.Samples, samples)
+	}
+}
+
+func TestReadWAVErrors(t *testing.T) {
+	// Not RIFF
+	if _, err := audio.ReadWAV(bytes.NewReader([]byte("NOT_A_WAV_FILE"))); err == nil {
+		t.Fatal("expected error for non-RIFF")
+	}
+
+	// Truncated header
+	if _, err := audio.ReadWAV(bytes.NewReader([]byte("RIFF"))); err == nil {
+		t.Fatal("expected error for truncated header")
+	}
+}

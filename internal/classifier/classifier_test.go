@@ -51,27 +51,63 @@ func TestFilter0(t *testing.T) {
 	}
 }
 
-func TestFilterUtils(t *testing.T) {
+func TestFilterTypes(t *testing.T) {
 	data := []float64{
 		1.0, 2.0, 3.0,
-		4.0, 5.0, 6.0,
-		7.0, 8.0, 9.0,
+		3.0, 4.0, 5.0,
+		6.0, 7.0, 8.0,
 	}
 	img := classifier.NewRollingIntegralImage(3)
 	img.AddRow(data[0:3])
 	img.AddRow(data[3:6])
 	img.AddRow(data[6:9])
 
-	// Filter0 area tests
-	flt0 := classifier.Filter{Type: 0, Y: 0, Height: 1, Width: 1}
-	if math.Abs(classifier.Subtract(img.Area(0, 0, 1, 1), 0)-1.0) > 1e-6 {
-		t.Fatalf("Filter0(0,0,1,1) failed")
+	// Filter0
+	f0 := classifier.Filter{Type: 0, Y: 0, Height: 2, Width: 2}
+	val0 := f0.Apply(img, 0)
+	if math.Abs(val0-math.Log(11.0)) > 1e-6 {
+		t.Fatalf("Filter0: got %g", val0)
 	}
-	if math.Abs(classifier.Subtract(img.Area(0, 0, 2, 2), 0)-12.0) > 1e-6 {
-		t.Fatalf("Filter0(0,0,2,2) failed")
+
+	// Filter1
+	f1 := classifier.Filter{Type: 1, Y: 0, Height: 2, Width: 2}
+	val1 := f1.Apply(img, 0)
+	// top row (0..1) sum: 1+3=4; bottom row (1..2) sum: 2+4=6
+	// SubtractLog(6, 4) = log(7/5)
+	if math.Abs(val1-math.Log(7.0/5.0)) > 1e-6 {
+		t.Fatalf("Filter1: got %g, want %g", val1, math.Log(7.0/5.0))
 	}
-	if math.Abs(classifier.Subtract(img.Area(0, 0, 3, 3), 0)-45.0) > 1e-6 {
-		t.Fatalf("Filter0(0,0,3,3) failed")
+
+	// Filter2
+	f2 := classifier.Filter{Type: 2, Y: 0, Height: 2, Width: 2}
+	val2 := f2.Apply(img, 0)
+	// left col (0..1) sum: 3+4=7; right col (1..2) sum: 1+2=3
+	// SubtractLog(7, 3) = log(8/4) = log(2)
+	if math.Abs(val2-math.Log(2.0)) > 1e-6 {
+		t.Fatalf("Filter2: got %g, want %g", val2, math.Log(2.0))
 	}
-	_ = flt0
+
+	// Filter3
+	f3 := classifier.Filter{Type: 3, Y: 0, Height: 2, Width: 2}
+	val3 := f3.Apply(img, 0)
+	// a = bottom-left(3) + top-right(2) = 5
+	// b = top-left(1) + bottom-right(4) = 5
+	// SubtractLog(5, 5) = 0
+	if math.Abs(val3-0.0) > 1e-6 {
+		t.Fatalf("Filter3: got %g, want 0", val3)
+	}
+
+	// Filter4 (3 rows)
+	f4 := classifier.Filter{Type: 4, Y: 0, Height: 3, Width: 3}
+	val4 := f4.Apply(img, 0)
+	if val4 == 0.0 {
+		t.Fatalf("Filter4: unexpected 0.0")
+	}
+
+	// Filter5 (3 cols)
+	f5 := classifier.Filter{Type: 5, Y: 0, Height: 3, Width: 3}
+	val5 := f5.Apply(img, 0)
+	if val5 == 0.0 {
+		t.Fatalf("Filter5: unexpected 0.0")
+	}
 }

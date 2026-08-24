@@ -3,6 +3,7 @@ package gochromaprint_test
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -83,6 +84,57 @@ func TestBasicImage(t *testing.T) {
 				t.Fatalf("row %d col %d: got %g, want %g", y, x, row[x], expected[y][x])
 			}
 		}
+	}
+}
+
+func TestAllAlgorithmsEndToEnd(t *testing.T) {
+	data := loadAudioFile(t, "test_stereo_44100.raw")
+
+	algos := []gochromaprint.Algorithm{
+		gochromaprint.AlgorithmTest1,
+		gochromaprint.AlgorithmTest2,
+		gochromaprint.AlgorithmTest3,
+		gochromaprint.AlgorithmTest4,
+		gochromaprint.AlgorithmTest5,
+	}
+
+	for _, algo := range algos {
+		t.Run(fmt.Sprintf("Algo_%d", algo), func(t *testing.T) {
+			ctx := gochromaprint.New(algo)
+			if err := ctx.Start(44100, 1); err != nil {
+				t.Fatalf("Start failed: %v", err)
+			}
+			if err := ctx.Feed(data); err != nil {
+				t.Fatalf("Feed failed: %v", err)
+			}
+			if err := ctx.Finish(); err != nil {
+				t.Fatalf("Finish failed: %v", err)
+			}
+
+			fp, err := ctx.Fingerprint()
+			if err != nil {
+				t.Fatalf("Fingerprint failed: %v", err)
+			}
+			if len(fp) == 0 {
+				t.Fatal("expected non-empty fingerprint")
+			}
+
+			hash, err := ctx.FingerprintHash()
+			if err != nil {
+				t.Fatalf("FingerprintHash failed: %v", err)
+			}
+			if hash == 0 {
+				t.Fatal("expected non-zero hash")
+			}
+
+			raw, err := ctx.RawFingerprint()
+			if err != nil {
+				t.Fatalf("RawFingerprint failed: %v", err)
+			}
+			if len(raw) == 0 {
+				t.Fatal("expected non-empty raw fingerprint")
+			}
+		})
 	}
 }
 
@@ -381,4 +433,3 @@ func TestContextClearAndContinue(t *testing.T) {
 		t.Fatal("expected non-empty fp2")
 	}
 }
-

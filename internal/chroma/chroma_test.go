@@ -2,6 +2,7 @@ package chroma_test
 
 import (
 	"math"
+	"reflect"
 	"testing"
 
 	"github.com/alexgorbatchev/gochromaprint/internal/chroma"
@@ -171,6 +172,43 @@ func TestChromaFilterBlur3(t *testing.T) {
 	}
 	if math.Abs(col.vectors[0][1]-10.2) > 1e-6 || math.Abs(col.vectors[1][1]-11.9) > 1e-6 {
 		t.Fatalf("col 1 values mismatch: %v", col.vectors)
+	}
+}
+
+func TestChromaFilterLargeKernel(t *testing.T) {
+	col := &vectorCollector{}
+	kernel := make([]float64, 10)
+	for i := range kernel {
+		kernel[i] = 0.1
+	}
+	filter := chroma.NewFilter(kernel, col)
+	for i := 0; i < 12; i++ {
+		row := make([]float64, 12)
+		row[0] = float64(i)
+		filter.Consume(row)
+	}
+	if len(col.vectors) != 3 {
+		t.Fatalf("got %d rows, want 3", len(col.vectors))
+	}
+}
+
+func TestChromaResampler(t *testing.T) {
+	col := &vectorCollector{}
+	resampler := chroma.NewResampler(2, col)
+
+	v1 := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12}
+	v2 := []float64{3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14}
+	resampler.Consume(v1)
+	if len(col.vectors) != 0 {
+		t.Fatalf("expected 0 vectors after 1 consume, got %d", len(col.vectors))
+	}
+	resampler.Consume(v2)
+	if len(col.vectors) != 1 {
+		t.Fatalf("expected 1 vector after 2 consumes, got %d", len(col.vectors))
+	}
+	expected := []float64{2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
+	if !reflect.DeepEqual(col.vectors[0], expected) {
+		t.Fatalf("got %v, want %v", col.vectors[0], expected)
 	}
 }
 

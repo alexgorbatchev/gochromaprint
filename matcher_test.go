@@ -88,5 +88,38 @@ func TestFingerprintMatcher(t *testing.T) {
 	if len(segments) == 0 {
 		t.Fatal("expected matching segments, got 0")
 	}
-	t.Logf("Found %d segments: %+v", len(segments), segments)
+	if segments[0].SimilarityPercent() < 80.0 {
+		t.Fatalf("expected high similarity percent, got %g", segments[0].SimilarityPercent())
+	}
+
+	// Exact match with self
+	selfSegments, err := matcher.Match(fp1, fp1)
+	if err != nil {
+		t.Fatalf("Match self failed: %v", err)
+	}
+	if len(selfSegments) == 0 || selfSegments[0].Score != 0.0 {
+		t.Fatalf("expected exact match score 0.0, got %+v", selfSegments)
+	}
+	if selfSegments[0].SimilarityPercent() != 100.0 {
+		t.Fatalf("expected 100%% similarity, got %g", selfSegments[0].SimilarityPercent())
+	}
+
+	// Empty match
+	emptySegments, err := matcher.Match(nil, fp2)
+	if err != nil || len(emptySegments) != 0 {
+		t.Fatalf("expected empty segments for nil input")
+	}
+
+	// Non-matching fingerprints
+	fpNonMatch := make([]uint32, len(fp1))
+	for i := range fpNonMatch {
+		fpNonMatch[i] = ^fp1[i]
+	}
+	nonMatchingSegments, err := matcher.Match(fp1, fpNonMatch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nonMatchingSegments) != 0 {
+		t.Fatalf("expected 0 matches, got %d", len(nonMatchingSegments))
+	}
 }

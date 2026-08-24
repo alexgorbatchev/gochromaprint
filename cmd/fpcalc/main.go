@@ -53,18 +53,20 @@ func readAudio(r io.Reader, defaultChannels, defaultRate int, maxLengthSecs floa
 
 	if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WAVE" {
 		wavInfo, err := audio.ReadWAV(bytes.NewReader(data))
-		if err == nil {
-			samples := wavInfo.Samples
-			duration := wavInfo.DurationSecs
-			if maxLengthSecs > 0 {
-				maxSamples := int(maxLengthSecs * float64(wavInfo.SampleRate*wavInfo.Channels))
-				if len(samples) > maxSamples {
-					samples = samples[:maxSamples]
-					duration = float64(len(samples)) / float64(wavInfo.SampleRate*wavInfo.Channels)
-				}
-			}
-			return samples, wavInfo.Channels, wavInfo.SampleRate, duration, nil
+		if err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("parsing WAV: %w", err)
 		}
+
+		samples := wavInfo.Samples
+		duration := wavInfo.DurationSecs
+		if maxLengthSecs > 0 {
+			maxSamples := int(maxLengthSecs * float64(wavInfo.SampleRate*wavInfo.Channels))
+			if len(samples) > maxSamples {
+				samples = samples[:maxSamples]
+				duration = float64(len(samples)) / float64(wavInfo.SampleRate*wavInfo.Channels)
+			}
+		}
+		return samples, wavInfo.Channels, wavInfo.SampleRate, duration, nil
 	}
 
 	channels := defaultChannels
@@ -94,7 +96,21 @@ func readAudio(r io.Reader, defaultChannels, defaultRate int, maxLengthSecs floa
 	return samples, channels, rate, duration, nil
 }
 
+func validateOptions(opts *cliOptions) error {
+	if opts.algorithm < 1 || opts.algorithm > 5 {
+		return fmt.Errorf("algorithm must be between 1 and 5 (got %d)", opts.algorithm)
+	}
+	if opts.format != "" && opts.format != "text" && opts.format != "json" && opts.format != "plain" {
+		return fmt.Errorf("unsupported format %q (must be text, json, or plain)", opts.format)
+	}
+	return nil
+}
+
 func processFile(filename string, opts *cliOptions, out io.Writer) error {
+	if err := validateOptions(opts); err != nil {
+		return err
+	}
+
 	var r io.Reader
 	if filename == "-" || filename == "pipe:0" {
 		r = os.Stdin
@@ -115,10 +131,6 @@ func processFile(filename string, opts *cliOptions, out io.Writer) error {
 	}
 
 	algo := gochromaprint.Algorithm(opts.algorithm - 1)
-	if opts.algorithm < 1 || opts.algorithm > 5 {
-		algo = gochromaprint.AlgorithmDefault
-	}
-
 	ctx := gochromaprint.New(algo)
 	if err := ctx.Start(rate, channels); err != nil {
 		return fmt.Errorf("initializing fingerprinter: %w", err)
@@ -191,9 +203,7 @@ func processFile(filename string, opts *cliOptions, out io.Writer) error {
 			Fingerprint: fpVal,
 		}
 		enc := json.NewEncoder(out)
-		if err := enc.Encode(res); err != nil {
-			return err
-		}
+		return enc.Encode(res)
 	}
 
 	return nil

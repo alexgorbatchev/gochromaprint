@@ -24,14 +24,26 @@ type Segment struct {
 	Pos1       int
 	Pos2       int
 	Duration   int
-	Score      float64
+	Score      float64 // Average bit errors per subfingerprint (0.0 .. 32.0)
 	LeftScore  float64
 	RightScore float64
 }
 
-// PublicScore returns the match score percentage as an integer (0..100).
+// PublicScore returns the average bit error score scaled by 100 (matching C++ Chromaprint public_score()).
 func (s Segment) PublicScore() int {
 	return int(s.Score*100.0 + 0.5)
+}
+
+// SimilarityPercent returns estimated similarity percentage (0.0% .. 100.0%).
+func (s Segment) SimilarityPercent() float64 {
+	pct := (1.0 - s.Score/32.0) * 100.0
+	if pct < 0 {
+		return 0
+	}
+	if pct > 100 {
+		return 100
+	}
+	return pct
 }
 
 // Merged returns a merged segment with another adjacent segment.
@@ -190,7 +202,7 @@ func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
 			size = fp2Size - offset2
 		}
 		if size <= 0 {
-			break
+			continue
 		}
 
 		bitCounts := make([]float64, size)
