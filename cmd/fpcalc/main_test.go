@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -9,8 +11,8 @@ import (
 )
 
 func TestNormalizeArgs(t *testing.T) {
-	in := []string{"-rate", "44100", "-channels", "2", "-length", "60", "-json", "-overlap", "file.wav"}
-	want := []string{"--rate", "44100", "--channels", "2", "--length", "60", "--json", "--overlap", "file.wav"}
+	in := []string{"-rate", "44100", "-channels", "2", "-length", "60", "-json", "-overlap", "-upgrade", "file.wav"}
+	want := []string{"--rate", "44100", "--channels", "2", "--length", "60", "--json", "--overlap", "--upgrade", "file.wav"}
 	got := normalizeArgs(in)
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("normalizeArgs = %v, want %v", got, want)
@@ -93,6 +95,47 @@ func TestCLIProcessFile(t *testing.T) {
 		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, format: "xml"}
 		if err := processFile(testFile, opts, true, buf); err == nil {
 			t.Fatal("expected error for invalid format")
+		}
+	})
+}
+
+func TestUpgradeFlag(t *testing.T) {
+	origUpgradeSelf := upgradeSelf
+	defer func() { upgradeSelf = origUpgradeSelf }()
+
+	t.Run("AlreadyUpToDate", func(t *testing.T) {
+		upgradeSelf = func(ctx context.Context, currentVersion string) (string, error) {
+			return "", errors.New("already at the latest version")
+		}
+		buf := &bytes.Buffer{}
+		if err := runUpgrade(context.Background(), buf); err != nil {
+			t.Fatalf("expected nil error, got %v", err)
+		}
+		if !strings.Contains(buf.String(), "already up to date") {
+			t.Fatalf("unexpected output: %q", buf.String())
+		}
+	})
+
+	t.Run("UpgradeSuccess", func(t *testing.T) {
+		upgradeSelf = func(ctx context.Context, currentVersion string) (string, error) {
+			return "1.6.1", nil
+		}
+		buf := &bytes.Buffer{}
+		if err := runUpgrade(context.Background(), buf); err != nil {
+			t.Fatalf("expected nil error, got %v", err)
+		}
+		if !strings.Contains(buf.String(), "Successfully upgraded fpcalc to version 1.6.1") {
+			t.Fatalf("unexpected output: %q", buf.String())
+		}
+	})
+
+	t.Run("UpgradeFailure", func(t *testing.T) {
+		upgradeSelf = func(ctx context.Context, currentVersion string) (string, error) {
+			return "", errors.New("network unreachable")
+		}
+		buf := &bytes.Buffer{}
+		if err := runUpgrade(context.Background(), buf); err == nil {
+			t.Fatal("expected error on upgrade failure")
 		}
 	})
 }

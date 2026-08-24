@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/alexgorbatchev/godeps"
 	"github.com/spf13/cobra"
 
 	"github.com/alexgorbatchev/gochromaprint"
@@ -19,6 +21,10 @@ import (
 )
 
 var version = gochromaprint.Version
+
+var upgradeSelf = func(ctx context.Context, currentVersion string) (string, error) {
+	return godeps.UpgradeSelf(ctx, "alexgorbatchev", "gochromaprint", currentVersion)
+}
 
 type formatType string
 
@@ -43,6 +49,7 @@ type cliOptions struct {
 	textOutput   bool
 	plainOutput  bool
 	ignoreErrors bool
+	upgrade      bool
 }
 
 type jsonResult struct {
@@ -103,6 +110,9 @@ func readAudio(r io.Reader, defaultChannels, defaultRate int, maxLengthSecs floa
 }
 
 func validateOptions(opts *cliOptions) error {
+	if opts.upgrade {
+		return nil
+	}
 	if opts.algorithm < 1 || opts.algorithm > 5 {
 		return fmt.Errorf("algorithm must be between 1 and 5 (got %d)", opts.algorithm)
 	}
@@ -313,7 +323,21 @@ func processFile(filename string, opts *cliOptions, isFirstFile bool, out io.Wri
 	return printChunkResult(ctx, opts, isFirstFile, ts, fullDuration, out)
 }
 
-// normalizeArgs rewrites single-dash long flags (e.g. -rate, -channels, -length, -algorithm)
+func runUpgrade(ctx context.Context, out io.Writer) error {
+	_, _ = fmt.Fprintf(out, "Checking for newer fpcalc release (current version: %s)...\n", version)
+	latestVer, err := upgradeSelf(ctx, version)
+	if err != nil {
+		if strings.Contains(err.Error(), "already at the latest version") {
+			_, _ = fmt.Fprintf(out, "fpcalc is already up to date (version %s).\n", version)
+			return nil
+		}
+		return fmt.Errorf("upgrade failed: %w", err)
+	}
+	_, _ = fmt.Fprintf(out, "Successfully upgraded fpcalc to version %s!\n", latestVer)
+	return nil
+}
+
+// normalizeArgs rewrites single-dash long flags (e.g. -rate, -channels, -length, -algorithm, -upgrade)
 // into standard double-dash flags (--rate, --channels, etc.) for drop-in compatibility with C++ fpcalc.
 func normalizeArgs(args []string) []string {
 	longFlags := map[string]bool{
@@ -331,6 +355,7 @@ func normalizeArgs(args []string) []string {
 		"-plain":         true,
 		"-format":        true,
 		"-ignore-errors": true,
+		"-upgrade":       true,
 		"-version":       true,
 		"-help":          true,
 	}
@@ -352,8 +377,20 @@ func main() {
 	rootCmd := &cobra.Command{
 		Use:   "fpcalc [OPTIONS] FILE [FILE...]",
 		Short: "Generate fingerprints from audio files/streams",
-		Args:  cobra.MinimumNArgs(1),
+		Args: func(cmd *cobra.Command, args []string) error {
+			if opts.upgrade {
+				return nil
+			}
+			if len(args) < 1 {
+				return errors.New("no input files")
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if opts.upgrade {
+				return runUpgrade(cmd.Context(), os.Stdout)
+			}
+
 			for i, file := range args {
 				err := processFile(file, opts, i == 0, os.Stdout)
 				if err != nil {
@@ -386,6 +423,7 @@ func main() {
 	flags.BoolVar(&opts.plainOutput, "plain", false, "Output only fingerprint string")
 	flags.StringVarP(&opts.format, "format", "f", "", "Output format (text, json, plain)")
 	flags.BoolVar(&opts.ignoreErrors, "ignore-errors", false, "Ignore errors on individual files")
+	flags.BoolVar(&opts.upgrade, "upgrade", false, "Upgrade fpcalc to the latest released version")
 
 	rootCmd.SetArgs(normalizeArgs(os.Args[1:]))
 

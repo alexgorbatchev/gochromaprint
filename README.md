@@ -127,6 +127,9 @@ fpcalc --raw audio.wav
 
 # Output only the fingerprint string
 fpcalc --plain audio.wav
+
+# Self-upgrade to the latest GitHub release
+fpcalc -upgrade
 ```
 
 ---
