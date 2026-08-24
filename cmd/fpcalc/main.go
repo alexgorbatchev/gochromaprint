@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -28,21 +29,26 @@ const (
 )
 
 type cliOptions struct {
-	format      string
-	channels    int
-	rate        int
-	length      float64
-	algorithm   int
-	raw         bool
-	signed      bool
-	jsonOutput  bool
-	textOutput  bool
-	plainOutput bool
+	format       string
+	channels     int
+	rate         int
+	length       float64
+	chunk        float64
+	algorithm    int
+	overlap      bool
+	ts           bool
+	raw          bool
+	signed       bool
+	jsonOutput   bool
+	textOutput   bool
+	plainOutput  bool
+	ignoreErrors bool
 }
 
 type jsonResult struct {
-	Duration    float64 `json:"duration"`
-	Fingerprint any     `json:"fingerprint"`
+	Timestamp   *float64 `json:"timestamp,omitempty"`
+	Duration    float64  `json:"duration"`
+	Fingerprint any      `json:"fingerprint"`
 }
 
 func readAudio(r io.Reader, defaultChannels, defaultRate int, maxLengthSecs float64) ([]int16, int, int, float64, error) {
@@ -106,51 +112,17 @@ func validateOptions(opts *cliOptions) error {
 	return nil
 }
 
-func processFile(filename string, opts *cliOptions, out io.Writer) error {
-	if err := validateOptions(opts); err != nil {
-		return err
-	}
-
-	var r io.Reader
-	if filename == "-" || filename == "pipe:0" {
-		r = os.Stdin
-	} else {
-		f, err := os.Open(filename)
-		if err != nil {
-			return fmt.Errorf("opening file %s: %w", filename, err)
-		}
-		defer func() {
-			_ = f.Close()
-		}()
-		r = f
-	}
-
-	samples, channels, rate, duration, err := readAudio(r, opts.channels, opts.rate, opts.length)
-	if err != nil {
-		return err
-	}
-
-	algo := gochromaprint.Algorithm(opts.algorithm - 1)
-	ctx := gochromaprint.New(algo)
-	if err := ctx.Start(rate, channels); err != nil {
-		return fmt.Errorf("initializing fingerprinter: %w", err)
-	}
-
-	if err := ctx.Feed(samples); err != nil {
-		return fmt.Errorf("processing audio: %w", err)
-	}
-
-	if err := ctx.Finish(); err != nil {
-		return fmt.Errorf("finishing audio processing: %w", err)
-	}
-
+func printChunkResult(ctx *gochromaprint.Context, opts *cliOptions, first bool, timestamp float64, duration float64, out io.Writer) error {
 	rawFp, err := ctx.RawFingerprint()
 	if err != nil {
 		return fmt.Errorf("getting raw fingerprint: %w", err)
 	}
 
 	if len(rawFp) == 0 {
-		return errors.New("empty fingerprint: not enough audio data")
+		if first {
+			return errors.New("empty fingerprint: not enough audio data")
+		}
+		return nil
 	}
 
 	selectedFormat := formatText
@@ -180,11 +152,23 @@ func processFile(filename string, opts *cliOptions, out io.Writer) error {
 
 	switch selectedFormat {
 	case formatText:
+		if !first {
+			if _, err := fmt.Fprintln(out); err != nil {
+				return err
+			}
+		}
+		if opts.ts {
+			if _, err := fmt.Fprintf(out, "TIMESTAMP=%.2f\n", timestamp); err != nil {
+				return err
+			}
+		}
 		_, err = fmt.Fprintf(out, "DURATION=%d\nFINGERPRINT=%s\n", int(duration), fpStr)
 		return err
+
 	case formatPlain:
 		_, err = fmt.Fprintln(out, fpStr)
 		return err
+
 	case formatJSON:
 		var fpVal any = fpStr
 		if opts.raw {
@@ -198,7 +182,12 @@ func processFile(filename string, opts *cliOptions, out io.Writer) error {
 				fpVal = rawFp
 			}
 		}
+		var tsPtr *float64
+		if opts.chunk > 0 || opts.ts {
+			tsPtr = &timestamp
+		}
 		res := jsonResult{
+			Timestamp:   tsPtr,
 			Duration:    duration,
 			Fingerprint: fpVal,
 		}
@@ -209,6 +198,154 @@ func processFile(filename string, opts *cliOptions, out io.Writer) error {
 	return nil
 }
 
+func processFile(filename string, opts *cliOptions, isFirstFile bool, out io.Writer) error {
+	if err := validateOptions(opts); err != nil {
+		return err
+	}
+
+	var r io.Reader
+	if filename == "-" || filename == "pipe:0" {
+		r = os.Stdin
+	} else {
+		f, err := os.Open(filename)
+		if err != nil {
+			return fmt.Errorf("opening file %s: %w", filename, err)
+		}
+		defer func() {
+			_ = f.Close()
+		}()
+		r = f
+	}
+
+	samples, channels, rate, fullDuration, err := readAudio(r, opts.channels, opts.rate, opts.length)
+	if err != nil {
+		return err
+	}
+
+	algo := gochromaprint.Algorithm(opts.algorithm - 1)
+	ctx := gochromaprint.New(algo)
+	if err := ctx.Start(rate, channels); err != nil {
+		return fmt.Errorf("initializing fingerprinter: %w", err)
+	}
+
+	// Chunked mode
+	if opts.chunk > 0 {
+		var ts float64
+		if opts.ts {
+			ts = float64(time.Now().UnixNano()) / 1e9
+		}
+
+		chunkLimit := int(opts.chunk * float64(rate))
+		extraChunkLimit := 0
+		overlapSecs := 0.0
+		if opts.overlap {
+			extraChunkLimit = ctx.Delay()
+			overlapSecs = float64(ctx.DelayMs()) / 1000.0
+		}
+
+		firstChunk := true
+		offset := 0
+		totalAudioFrames := len(samples) / channels
+
+		for offset < totalAudioFrames {
+			targetFrames := chunkLimit + extraChunkLimit
+			remainingFrames := totalAudioFrames - offset
+			takeFrames := remainingFrames
+			if takeFrames > targetFrames {
+				takeFrames = targetFrames
+			}
+
+			startSample := offset * channels
+			endSample := (offset + takeFrames) * channels
+			if err := ctx.Feed(samples[startSample:endSample]); err != nil {
+				return err
+			}
+			offset += takeFrames
+
+			if takeFrames == targetFrames || offset >= totalAudioFrames {
+				if err := ctx.Finish(); err != nil {
+					return err
+				}
+
+				chunkDuration := float64(takeFrames-extraChunkLimit)/float64(rate) + overlapSecs
+				if err := printChunkResult(ctx, opts, firstChunk && isFirstFile, ts, chunkDuration, out); err != nil {
+					return err
+				}
+
+				if opts.ts {
+					ts = float64(time.Now().UnixNano()) / 1e9
+				} else {
+					ts += chunkDuration
+				}
+
+				if opts.overlap {
+					ctx.Clear()
+					ts -= overlapSecs
+				} else {
+					if err := ctx.Start(rate, channels); err != nil {
+						return err
+					}
+				}
+
+				if firstChunk {
+					extraChunkLimit = 0
+					firstChunk = false
+				}
+			}
+		}
+		return nil
+	}
+
+	// Normal single-result mode
+	if err := ctx.Feed(samples); err != nil {
+		return fmt.Errorf("processing audio: %w", err)
+	}
+
+	if err := ctx.Finish(); err != nil {
+		return fmt.Errorf("finishing audio processing: %w", err)
+	}
+
+	var ts float64
+	if opts.ts {
+		ts = float64(time.Now().UnixNano()) / 1e9
+	}
+
+	return printChunkResult(ctx, opts, isFirstFile, ts, fullDuration, out)
+}
+
+// normalizeArgs rewrites single-dash long flags (e.g. -rate, -channels, -length, -algorithm)
+// into standard double-dash flags (--rate, --channels, etc.) for drop-in compatibility with C++ fpcalc.
+func normalizeArgs(args []string) []string {
+	longFlags := map[string]bool{
+		"-rate":          true,
+		"-channels":      true,
+		"-length":        true,
+		"-chunk":         true,
+		"-algorithm":     true,
+		"-overlap":       true,
+		"-ts":            true,
+		"-raw":           true,
+		"-signed":        true,
+		"-json":          true,
+		"-text":          true,
+		"-plain":         true,
+		"-format":        true,
+		"-ignore-errors": true,
+		"-version":       true,
+		"-help":          true,
+	}
+
+	res := make([]string, len(args))
+	for i, arg := range args {
+		if longFlags[arg] {
+			res[i] = "-" + arg
+		} else {
+			res[i] = arg
+		}
+	}
+	return res
+}
+
 func main() {
 	opts := &cliOptions{}
 
@@ -217,8 +354,13 @@ func main() {
 		Short: "Generate fingerprints from audio files/streams",
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			for _, file := range args {
-				if err := processFile(file, opts, os.Stdout); err != nil {
+			for i, file := range args {
+				err := processFile(file, opts, i == 0, os.Stdout)
+				if err != nil {
+					if opts.ignoreErrors {
+						fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+						continue
+					}
 					return err
 				}
 			}
@@ -233,13 +375,19 @@ func main() {
 	flags.IntVarP(&opts.channels, "channels", "c", 0, "Number of channels in input audio")
 	flags.IntVarP(&opts.rate, "rate", "r", 0, "Sample rate of input audio")
 	flags.Float64VarP(&opts.length, "length", "t", 120.0, "Restrict duration in seconds (default 120)")
+	flags.Float64Var(&opts.chunk, "chunk", 0, "Split input audio into chunks of this duration")
 	flags.IntVarP(&opts.algorithm, "algorithm", "a", 2, "Algorithm method (1-5, default 2)")
+	flags.BoolVar(&opts.overlap, "overlap", false, "Overlap chunks slightly to cover edges")
+	flags.BoolVar(&opts.ts, "ts", false, "Output UNIX timestamps for chunked results")
 	flags.BoolVar(&opts.raw, "raw", false, "Output uncompressed raw fingerprints")
 	flags.BoolVar(&opts.signed, "signed", false, "Output uncompressed integers as signed")
 	flags.BoolVar(&opts.jsonOutput, "json", false, "Output in JSON format")
 	flags.BoolVar(&opts.textOutput, "text", false, "Output in text format")
 	flags.BoolVar(&opts.plainOutput, "plain", false, "Output only fingerprint string")
 	flags.StringVarP(&opts.format, "format", "f", "", "Output format (text, json, plain)")
+	flags.BoolVar(&opts.ignoreErrors, "ignore-errors", false, "Ignore errors on individual files")
+
+	rootCmd.SetArgs(normalizeArgs(os.Args[1:]))
 
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
