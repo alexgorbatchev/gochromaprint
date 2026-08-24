@@ -1,0 +1,22 @@
+# Default recipe: list available tasks
+default:
+    @just --list
+
+# Build compiled binary strictly into bin/
+build:
+    @mkdir -p bin
+    go build -o bin/fpcalc ./cmd/fpcalc
+
+# Run all unit tests with race detector
+test:
+    go test -race ./...
+
+# Check module hygiene and run vet + linter
+lint:
+    go mod tidy -diff
+    go vet ./...
+    golangci-lint run
+
+# Clean build artifacts
+clean:
+    rm -rf bin/
