@@ -89,6 +89,7 @@ func TestBasicImage(t *testing.T) {
 
 func TestAllAlgorithmsEndToEnd(t *testing.T) {
 	data := loadAudioFile(t, "test_stereo_44100.raw")
+	data = append(append(append([]int16(nil), data...), data...), data...)
 
 	algos := []gochromaprint.Algorithm{
 		gochromaprint.AlgorithmTest1,
@@ -141,6 +142,30 @@ func TestAllAlgorithmsEndToEnd(t *testing.T) {
 				t.Fatal("expected non-empty raw fingerprint")
 			}
 		})
+	}
+}
+
+func TestAlgorithm3NativeFingerprint(t *testing.T) {
+	data := loadAudioFile(t, "test_mono_11025.raw")
+	ctx := gochromaprint.New(gochromaprint.AlgorithmTest3)
+	if err := ctx.Start(11025, 1); err != nil {
+		t.Fatal(err)
+	}
+	for range 5 {
+		if err := ctx.Feed(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := ctx.Finish(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ctx.Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Original fpcalc 1.6.1, -algorithm 3 -format s16le -rate 11025 -channels 1.
+	if want := "AgAAB1qiJUlERcIRHHrx4gciEUEQ"; got != want {
+		t.Fatalf("got %s, want native %s", got, want)
 	}
 }
 

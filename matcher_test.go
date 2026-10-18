@@ -8,6 +8,22 @@ import (
 	"github.com/alexgorbatchev/gochromaprint/internal/classifier"
 )
 
+func TestMatcherAlignmentTie(t *testing.T) {
+	pattern := make([]uint32, 50)
+	for i := range pattern {
+		pattern[i] = uint32(i+1) << 20
+	}
+	repeated := append(append([]uint32(nil), pattern...), pattern...)
+	matcher := gochromaprint.NewMatcher(gochromaprint.New(gochromaprint.AlgorithmDefault).Config())
+	segments, err := matcher.Match(repeated, pattern)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segments) != 1 || segments[0].Pos1 != 50 || segments[0].Duration != 50 {
+		t.Fatalf("tie should select greatest native alignment offset, got %+v", segments)
+	}
+}
+
 func TestFingerprintMatcher(t *testing.T) {
 	fp1Signed := []int32{
 		1889975932, -257508804, -240734660, -236548548, -1275161041, -1283549650, -1288796626, -1288845782,

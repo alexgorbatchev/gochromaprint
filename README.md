@@ -5,8 +5,8 @@
 
 A pure Go port of [Chromaprint](https://acoustid.org/chromaprint), the audio fingerprinting library used by [AcoustID](https://acoustid.org).
 
-- **100% Pure Go**: Zero CGO, zero external audio processing dependencies.
-- **Bit-for-bit Compatible**: Exact AcoustID / Chromaprint algorithm implementations (Test1–Test5, including default Algorithm 2).
+- **Pure Go Library**: No CGO or external decoder is needed when feeding decoded PCM samples.
+- **Chromaprint Algorithms**: Test1–Test5, including default Algorithm 2, with upstream fingerprint regression fixtures.
 - **Built-in Sinc Resampler & Radix-2 Real FFT**: Native polyphase sinc resampling and high-performance FFT.
 - **Fingerprint Matcher & SimHash**: Full support for fingerprint comparison, segment alignment, and locality-sensitive hashing.
 - **Includes `fpcalc` CLI**: Drop-in compatible command-line tool.
@@ -23,19 +23,13 @@ go get github.com/alexgorbatchev/gochromaprint
 
 ### `fpcalc` CLI
 
-`fpcalc` is a **100% drop-in replacement** for the upstream C++ `fpcalc` utility, accepting identical flags and arguments.
+`fpcalc` targets the upstream C++ command's audio processing and output contracts. The Go package exposes Go functions; it does not export the native C ABI.
 
 #### Pre-built Binaries (GitHub Releases)
 
 Download pre-built binaries for macOS (Darwin), Linux, or Windows (amd64 / arm64) directly from the [GitHub Releases](https://github.com/alexgorbatchev/gochromaprint/releases) page:
 
-```bash
-# Using GitHub CLI
-gh release download -R alexgorbatchev/gochromaprint --pattern "*darwin_arm64.tar.gz"
-
-# Or install / update via Go toolchain
-go install github.com/alexgorbatchev/gochromaprint/cmd/fpcalc@latest
-```
+Install [FFmpeg](https://ffmpeg.org/download.html), including `ffmpeg` and `ffprobe`, on `PATH` for the CLI. The Go library itself consumes PCM and does not launch these tools.
 
 Once installed, `fpcalc` can also self-upgrade to the latest release in-place:
 
@@ -123,7 +117,7 @@ if err != nil {
 }
 
 for _, seg := range segments {
-    fmt.Printf("Match: Pos1=%d, Pos2=%d, Duration=%d, Score=%.2f (PublicScore=%d%%)\n",
+    fmt.Printf("Match: Pos1=%d, Pos2=%d, Duration=%d, Score=%.2f (PublicScore=%d)\n",
         seg.Pos1, seg.Pos2, seg.Duration, seg.Score, seg.PublicScore())
 }
 ```
@@ -132,12 +126,12 @@ for _, seg := range segments {
 
 ## `fpcalc` CLI
 
-`fpcalc` is a **drop-in replacement** for the official Chromaprint `fpcalc` tool with support for single-dash (`-rate`, `-channels`, `-length`) and double-dash (`--rate`, `--json`) arguments, WAV containers, raw PCM streams, and automatic self-updates:
+`fpcalc` accepts single-dash (`-rate`, `-channels`, `-length`) and double-dash (`--rate`, `--json`) arguments. FFmpeg decodes supported containers and compressed formats as a stream; raw PCM requires an explicit input format. No audio files are rewritten. The default fingerprint limit is 120 seconds; `-length 0` processes the whole stream. Reported non-chunked duration describes the full input, independently of that limit. Unknown duration on stdin is reported as zero.
 
 ```bash
 # Generate fingerprint from a WAV or raw PCM audio file
 fpcalc audio.wav
-fpcalc -c 2 -r 44100 audio.raw
+fpcalc -format s16le -c 2 -r 44100 audio.raw
 
 # Output JSON
 fpcalc --json audio.wav
@@ -160,7 +154,7 @@ fpcalc -upgrade
 |-----------|-------------|
 | `AlgorithmTest1` (0) | Algorithm version 1 (randomly selected test data) |
 | `AlgorithmTest2` (1) | Algorithm version 2 (**Default AcoustID Algorithm**) |
-| `AlgorithmTest3` (2) | Algorithm version 3 (interpolated pitch notes) |
+| `AlgorithmTest3` (2) | Experimental non-overlapping frames; interpolation remains disabled to match upstream |
 | `AlgorithmTest4` (3) | Algorithm version 4 (automatic leading silence removal) |
 | `AlgorithmTest5` (4) | Algorithm version 5 (2x higher temporal resolution) |
 
@@ -175,15 +169,9 @@ fpcalc -upgrade
 
 ---
 
-## Development
+## Matching Scores
 
-Use `just` to run recipes:
-
-```bash
-just build    # Build bin/fpcalc
-just test     # Run all unit tests with race detector
-just lint     # Check hygiene, vet, and linter
-```
+`Segment.Score` measures average differing bits per subfingerprint (0–32); lower is closer. `PublicScore()` scales that error score by 100 and is not a similarity percentage. Like upstream, the matcher may combine similar-scoring segments across a rejected interval; a returned segment's duration does not establish uninterrupted agreement across its extent.
 
 ---
 

@@ -123,7 +123,8 @@ func (c *Context) initPipeline() {
 
 	// Stage 3: Chroma extractor
 	c.chroma = chroma.NewExtractor(minFrequency, maxFrequency, c.config.FrameSize, c.config.SampleRate, c.chromaFilter)
-	c.chroma.SetInterpolate(c.config.Interpolate)
+	// Upstream records the experimental interpolation setting but deliberately
+	// leaves it disabled in Fingerprinter's pipeline, including algorithm 3.
 
 	// Stage 2: Real FFT
 	c.fft = fft.New(c.config.FrameSize)

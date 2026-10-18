@@ -57,7 +57,7 @@ func TestCLIProcessFile(t *testing.T) {
 
 	t.Run("TextDefault", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 2}
 		if err := processFile(testFile, opts, true, buf); err != nil {
 			t.Fatal(err)
 		}
@@ -69,7 +69,7 @@ func TestCLIProcessFile(t *testing.T) {
 
 	t.Run("Plain", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, plainOutput: true}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 2, plainOutput: true}
 		if err := processFile(testFile, opts, true, buf); err != nil {
 			t.Fatal(err)
 		}
@@ -81,19 +81,19 @@ func TestCLIProcessFile(t *testing.T) {
 
 	t.Run("JSON", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, jsonOutput: true}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 2, jsonOutput: true}
 		if err := processFile(testFile, opts, true, buf); err != nil {
 			t.Fatal(err)
 		}
 		out := buf.String()
-		if !strings.Contains(out, `"duration":4`) || !strings.Contains(out, `"fingerprint":"AQAAC`) {
+		if !strings.Contains(out, `"duration": 4.00`) || !strings.Contains(out, `"fingerprint": "AQAAC`) {
 			t.Fatalf("unexpected JSON output: %q", out)
 		}
 	})
 
 	t.Run("RawSigned", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, raw: true, signed: true}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 2, raw: true, signed: true}
 		if err := processFile(testFile, opts, true, buf); err != nil {
 			t.Fatal(err)
 		}
@@ -105,31 +105,31 @@ func TestCLIProcessFile(t *testing.T) {
 
 	t.Run("RawSignedJSON", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, raw: true, signed: true, jsonOutput: true}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 2, raw: true, signed: true, jsonOutput: true}
 		if err := processFile(testFile, opts, true, buf); err != nil {
 			t.Fatal(err)
 		}
 		out := buf.String()
-		if !strings.Contains(out, `"duration":4`) || !strings.Contains(out, `"fingerprint":[-554577065`) {
+		if !strings.Contains(out, `"duration": 4.00`) || !strings.Contains(out, `"fingerprint": [-554577065`) {
 			t.Fatalf("unexpected raw signed JSON output: %q", out)
 		}
 	})
 
 	t.Run("RawUnsignedJSON", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, raw: true, jsonOutput: true}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 2, raw: true, jsonOutput: true}
 		if err := processFile(testFile, opts, true, buf); err != nil {
 			t.Fatal(err)
 		}
 		out := buf.String()
-		if !strings.Contains(out, `"duration":4`) || !strings.Contains(out, `"fingerprint":[3740390231`) {
+		if !strings.Contains(out, `"duration": 4.00`) || !strings.Contains(out, `"fingerprint": [3740390231`) {
 			t.Fatalf("unexpected raw unsigned JSON output: %q", out)
 		}
 	})
 
 	t.Run("TimestampOutput", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2, ts: true}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 2, ts: true}
 		if err := processFile(testFile, opts, true, buf); err != nil {
 			t.Fatal(err)
 		}
@@ -141,7 +141,7 @@ func TestCLIProcessFile(t *testing.T) {
 
 	t.Run("SecondFileSpacing", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 2}
 		if err := processFile(testFile, opts, false, buf); err != nil {
 			t.Fatal(err)
 		}
@@ -153,7 +153,7 @@ func TestCLIProcessFile(t *testing.T) {
 
 	t.Run("ChunkMode", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, chunk: 3.0, algorithm: 2, textOutput: true}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, chunk: 3.0, algorithm: 2, textOutput: true}
 		if err := processFile(testFile, opts, true, buf); err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +165,7 @@ func TestCLIProcessFile(t *testing.T) {
 
 	t.Run("ChunkModeWithOverlapAndTS", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, chunk: 3.0, overlap: true, ts: true, algorithm: 2, textOutput: true}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, chunk: 3.0, overlap: true, ts: true, algorithm: 2, textOutput: true}
 		if err := processFile(testFile, opts, true, buf); err != nil {
 			t.Fatal(err)
 		}
@@ -177,7 +177,7 @@ func TestCLIProcessFile(t *testing.T) {
 
 	t.Run("InvalidAlgorithm", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 99}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 99}
 		if err := processFile(testFile, opts, true, buf); err == nil {
 			t.Fatal("expected error for invalid algorithm")
 		}
@@ -193,7 +193,7 @@ func TestCLIProcessFile(t *testing.T) {
 
 	t.Run("NonExistentFile", func(t *testing.T) {
 		buf := &bytes.Buffer{}
-		opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2}
+		opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 2}
 		if err := processFile("nonexistent-file.raw", opts, true, buf); err == nil {
 			t.Fatal("expected error for non-existent file")
 		}
@@ -212,7 +212,7 @@ func TestReadAudioWAV(t *testing.T) {
 	if err := processFile(tmpPath, opts, true, buf); err != nil {
 		t.Fatalf("failed to process WAV file: %v", err)
 	}
-	if !strings.Contains(buf.String(), "DURATION=4\n") {
+	if !strings.Contains(buf.String(), "DURATION=5\n") {
 		t.Fatalf("expected DURATION=4 in output: %q", buf.String())
 	}
 }
@@ -280,7 +280,7 @@ func TestStdinReading(t *testing.T) {
 	defer func() { os.Stdin = origStdin }()
 
 	buf := &bytes.Buffer{}
-	opts := &cliOptions{channels: 1, rate: 44100, length: 120, algorithm: 2}
+	opts := &cliOptions{format: "s16le", channels: 1, rate: 44100, length: 120, algorithm: 2}
 	if err := processFile("-", opts, true, buf); err != nil {
 		t.Fatalf("failed reading stdin: %v", err)
 	}

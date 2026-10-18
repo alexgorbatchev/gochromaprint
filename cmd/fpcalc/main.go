@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,13 +9,11 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/alexgorbatchev/godeps"
 	"github.com/spf13/cobra"
 
 	"github.com/alexgorbatchev/gochromaprint"
-	"github.com/alexgorbatchev/gochromaprint/internal/audio"
 )
 
 var version = gochromaprint.Version
@@ -52,61 +48,24 @@ type cliOptions struct {
 	upgrade      bool
 }
 
-type jsonResult struct {
-	Timestamp   *float64 `json:"timestamp,omitempty"`
-	Duration    float64  `json:"duration"`
-	Fingerprint any      `json:"fingerprint"`
+type outputFlag struct {
+	opts   *cliOptions
+	format formatType
 }
 
-func readAudio(r io.Reader, defaultChannels, defaultRate int, maxLengthSecs float64) ([]int16, int, int, float64, error) {
-	data, err := io.ReadAll(r)
+func (f outputFlag) String() string { return "false" }
+func (f outputFlag) Type() string   { return "bool" }
+func (f outputFlag) Set(value string) error {
+	enabled, err := strconv.ParseBool(value)
 	if err != nil {
-		return nil, 0, 0, 0, fmt.Errorf("reading input: %w", err)
+		return err
 	}
-
-	if len(data) >= 12 && string(data[0:4]) == "RIFF" && string(data[8:12]) == "WAVE" {
-		wavInfo, err := audio.ReadWAV(bytes.NewReader(data))
-		if err != nil {
-			return nil, 0, 0, 0, fmt.Errorf("parsing WAV: %w", err)
-		}
-
-		samples := wavInfo.Samples
-		duration := wavInfo.DurationSecs
-		if maxLengthSecs > 0 {
-			maxSamples := int(maxLengthSecs * float64(wavInfo.SampleRate*wavInfo.Channels))
-			if len(samples) > maxSamples {
-				samples = samples[:maxSamples]
-				duration = float64(len(samples)) / float64(wavInfo.SampleRate*wavInfo.Channels)
-			}
-		}
-		return samples, wavInfo.Channels, wavInfo.SampleRate, duration, nil
+	if enabled {
+		f.opts.jsonOutput = f.format == formatJSON
+		f.opts.plainOutput = f.format == formatPlain
+		f.opts.textOutput = f.format == formatText
 	}
-
-	channels := defaultChannels
-	if channels <= 0 {
-		channels = 2
-	}
-	rate := defaultRate
-	if rate <= 0 {
-		rate = 44100
-	}
-
-	numSamples := len(data) / 2
-	samples := make([]int16, numSamples)
-	for i := 0; i < numSamples; i++ {
-		samples[i] = int16(binary.LittleEndian.Uint16(data[i*2:]))
-	}
-
-	duration := float64(len(samples)) / float64(channels*rate)
-	if maxLengthSecs > 0 {
-		maxSamples := int(maxLengthSecs * float64(rate*channels))
-		if len(samples) > maxSamples {
-			samples = samples[:maxSamples]
-			duration = float64(len(samples)) / float64(rate*channels)
-		}
-	}
-
-	return samples, channels, rate, duration, nil
+	return nil
 }
 
 func validateOptions(opts *cliOptions) error {
@@ -116,8 +75,8 @@ func validateOptions(opts *cliOptions) error {
 	if opts.algorithm < 1 || opts.algorithm > 5 {
 		return fmt.Errorf("algorithm must be between 1 and 5 (got %d)", opts.algorithm)
 	}
-	if opts.format != "" && opts.format != "text" && opts.format != "json" && opts.format != "plain" {
-		return fmt.Errorf("unsupported format %q (must be text, json, or plain)", opts.format)
+	if !validDuration(opts.length) || !validDuration(opts.chunk) || opts.rate < 0 || opts.channels < 0 {
+		return errors.New("duration, rate, and channels must not be negative")
 	}
 	return nil
 }
@@ -136,9 +95,9 @@ func printChunkResult(ctx *gochromaprint.Context, opts *cliOptions, first bool, 
 	}
 
 	selectedFormat := formatText
-	if opts.jsonOutput || opts.format == "json" {
+	if opts.jsonOutput {
 		selectedFormat = formatJSON
-	} else if opts.plainOutput || opts.format == "plain" {
+	} else if opts.plainOutput {
 		selectedFormat = formatPlain
 	}
 
@@ -192,135 +151,19 @@ func printChunkResult(ctx *gochromaprint.Context, opts *cliOptions, first bool, 
 				fpVal = rawFp
 			}
 		}
-		var tsPtr *float64
-		if opts.chunk > 0 || opts.ts {
-			tsPtr = &timestamp
+		encoded, err := json.Marshal(fpVal)
+		if err != nil {
+			return err
 		}
-		res := jsonResult{
-			Timestamp:   tsPtr,
-			Duration:    duration,
-			Fingerprint: fpVal,
+		if opts.chunk > 0 {
+			_, err = fmt.Fprintf(out, "{\"timestamp\": %.2f, \"duration\": %.2f, \"fingerprint\": %s}\n", timestamp, duration, encoded)
+		} else {
+			_, err = fmt.Fprintf(out, "{\"duration\": %.2f, \"fingerprint\": %s}\n", duration, encoded)
 		}
-		enc := json.NewEncoder(out)
-		return enc.Encode(res)
+		return err
 	}
 
 	return nil
-}
-
-func processFile(filename string, opts *cliOptions, isFirstFile bool, out io.Writer) error {
-	if err := validateOptions(opts); err != nil {
-		return err
-	}
-
-	var r io.Reader
-	if filename == "-" || filename == "pipe:0" {
-		r = os.Stdin
-	} else {
-		f, err := os.Open(filename)
-		if err != nil {
-			return fmt.Errorf("opening file %s: %w", filename, err)
-		}
-		defer func() {
-			_ = f.Close()
-		}()
-		r = f
-	}
-
-	samples, channels, rate, fullDuration, err := readAudio(r, opts.channels, opts.rate, opts.length)
-	if err != nil {
-		return err
-	}
-
-	algo := gochromaprint.Algorithm(opts.algorithm - 1)
-	ctx := gochromaprint.New(algo)
-	if err := ctx.Start(rate, channels); err != nil {
-		return fmt.Errorf("initializing fingerprinter: %w", err)
-	}
-
-	// Chunked mode
-	if opts.chunk > 0 {
-		var ts float64
-		if opts.ts {
-			ts = float64(time.Now().UnixNano()) / 1e9
-		}
-
-		chunkLimit := int(opts.chunk * float64(rate))
-		extraChunkLimit := 0
-		overlapSecs := 0.0
-		if opts.overlap {
-			extraChunkLimit = ctx.Delay()
-			overlapSecs = float64(ctx.DelayMs()) / 1000.0
-		}
-
-		firstChunk := true
-		offset := 0
-		totalAudioFrames := len(samples) / channels
-
-		for offset < totalAudioFrames {
-			targetFrames := chunkLimit + extraChunkLimit
-			remainingFrames := totalAudioFrames - offset
-			takeFrames := remainingFrames
-			if takeFrames > targetFrames {
-				takeFrames = targetFrames
-			}
-
-			startSample := offset * channels
-			endSample := (offset + takeFrames) * channels
-			if err := ctx.Feed(samples[startSample:endSample]); err != nil {
-				return err
-			}
-			offset += takeFrames
-
-			if takeFrames == targetFrames || offset >= totalAudioFrames {
-				if err := ctx.Finish(); err != nil {
-					return err
-				}
-
-				chunkDuration := float64(takeFrames-extraChunkLimit)/float64(rate) + overlapSecs
-				if err := printChunkResult(ctx, opts, firstChunk && isFirstFile, ts, chunkDuration, out); err != nil {
-					return err
-				}
-
-				if opts.ts {
-					ts = float64(time.Now().UnixNano()) / 1e9
-				} else {
-					ts += chunkDuration
-				}
-
-				if opts.overlap {
-					ctx.Clear()
-					ts -= overlapSecs
-				} else {
-					if err := ctx.Start(rate, channels); err != nil {
-						return err
-					}
-				}
-
-				if firstChunk {
-					extraChunkLimit = 0
-					firstChunk = false
-				}
-			}
-		}
-		return nil
-	}
-
-	// Normal single-result mode
-	if err := ctx.Feed(samples); err != nil {
-		return fmt.Errorf("processing audio: %w", err)
-	}
-
-	if err := ctx.Finish(); err != nil {
-		return fmt.Errorf("finishing audio processing: %w", err)
-	}
-
-	var ts float64
-	if opts.ts {
-		ts = float64(time.Now().UnixNano()) / 1e9
-	}
-
-	return printChunkResult(ctx, opts, isFirstFile, ts, fullDuration, out)
 }
 
 func runUpgrade(ctx context.Context, out io.Writer) error {
@@ -361,8 +204,12 @@ func normalizeArgs(args []string) []string {
 	}
 
 	res := make([]string, len(args))
+	literal := false
 	for i, arg := range args {
-		if longFlags[arg] {
+		if arg == "--" {
+			literal = true
+		}
+		if !literal && longFlags[arg] {
 			res[i] = "-" + arg
 		} else {
 			res[i] = arg
@@ -371,12 +218,20 @@ func normalizeArgs(args []string) []string {
 	return res
 }
 
-func main() {
+func newCommand() *cobra.Command {
 	opts := &cliOptions{}
 
 	rootCmd := &cobra.Command{
-		Use:   "fpcalc [OPTIONS] FILE [FILE...]",
-		Short: "Generate fingerprints from audio files/streams",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Use:           "fpcalc [OPTIONS] FILE [FILE...]",
+		Short:         "Generate fingerprints from audio files/streams",
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().Changed("channels") && opts.channels <= 0 {
+				return errors.New("input channels must be positive")
+			}
+			return validateOptions(opts)
+		},
 		Args: func(cmd *cobra.Command, args []string) error {
 			if opts.upgrade {
 				return nil
@@ -388,16 +243,12 @@ func main() {
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if opts.upgrade {
-				return runUpgrade(cmd.Context(), os.Stdout)
+				return runUpgrade(cmd.Context(), cmd.OutOrStdout())
 			}
 
-			for i, file := range args {
-				err := processFile(file, opts, i == 0, os.Stdout)
+			for _, file := range args {
+				err := processFile(file, opts, true, cmd.OutOrStdout())
 				if err != nil {
-					if opts.ignoreErrors {
-						fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
-						continue
-					}
 					return err
 				}
 			}
@@ -418,16 +269,33 @@ func main() {
 	flags.BoolVar(&opts.ts, "ts", false, "Output UNIX timestamps for chunked results")
 	flags.BoolVar(&opts.raw, "raw", false, "Output uncompressed raw fingerprints")
 	flags.BoolVar(&opts.signed, "signed", false, "Output uncompressed integers as signed")
-	flags.BoolVar(&opts.jsonOutput, "json", false, "Output in JSON format")
-	flags.BoolVar(&opts.textOutput, "text", false, "Output in text format")
-	flags.BoolVar(&opts.plainOutput, "plain", false, "Output only fingerprint string")
-	flags.StringVarP(&opts.format, "format", "f", "", "Output format (text, json, plain)")
+	for _, item := range []struct {
+		format formatType
+		help   string
+	}{{formatJSON, "Output in JSON format"}, {formatText, "Output in text format"}, {formatPlain, "Output only fingerprint string"}} {
+		flags.Var(outputFlag{opts, item.format}, string(item.format), item.help)
+		flags.Lookup(string(item.format)).NoOptDefVal = "true"
+	}
+	flags.StringVarP(&opts.format, "format", "f", "", "Input format name (for example s16le)")
 	flags.BoolVar(&opts.ignoreErrors, "ignore-errors", false, "Ignore errors on individual files")
 	flags.BoolVar(&opts.upgrade, "upgrade", false, "Upgrade fpcalc to the latest released version")
 
-	rootCmd.SetArgs(normalizeArgs(os.Args[1:]))
+	return rootCmd
+}
 
+func main() {
+	rootCmd := newCommand()
+	rootCmd.SetArgs(normalizeArgs(os.Args[1:]))
 	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		fmt.Fprintf(os.Stderr, "ERROR: %v\n", err)
+		os.Exit(exitCode(err))
 	}
+}
+
+func exitCode(err error) int {
+	var partial *partialDecodeError
+	if errors.As(err, &partial) {
+		return 3
+	}
+	return 2
 }

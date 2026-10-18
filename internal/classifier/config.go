@@ -111,7 +111,7 @@ func NewConfigTest2() Config {
 
 // NewConfigTest3 returns configuration for Algorithm Test3 (interpolated).
 func NewConfigTest3() Config {
-	return makeConfig(classifiersTest2, defaultChromaFilterCoefficients, true, false, 0, DefaultFrameSize, DefaultFrameOverlap, DefaultSampleRate)
+	return makeConfig(classifiersTest2, defaultChromaFilterCoefficients, true, false, 0, DefaultFrameSize, 0, DefaultSampleRate)
 }
 
 // NewConfigTest4 returns configuration for Algorithm Test4 (with silence removal).

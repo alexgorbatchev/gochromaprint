@@ -178,7 +178,7 @@ func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
 
 	sort.Slice(bestAlignments, func(i, j int) bool {
 		if bestAlignments[i].count == bestAlignments[j].count {
-			return bestAlignments[i].index < bestAlignments[j].index
+			return bestAlignments[i].index > bestAlignments[j].index
 		}
 		return bestAlignments[i].count > bestAlignments[j].count
 	})
