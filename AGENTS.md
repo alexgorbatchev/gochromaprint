@@ -1,6 +1,6 @@
 ---
 created_on: 2026-10-18 16:32
-last_modified: 2026-10-18 16:32
+last_modified: 2026-10-18 16:36
 status: current
 ---
 
@@ -21,5 +21,6 @@ The library and bundled `fpcalc` target functional compatibility with the origin
 - Preserve the pure Go PCM library. Keep media-container decoding in the CLI.
 - FFmpeg decoding must use the upstream compatible SWR resampler settings. Default FFmpeg resampling changes fingerprints.
 - Algorithm 3 has zero frame overlap. Upstream leaves pitch interpolation disabled in the fingerprint pipeline despite its configuration flag.
+- Native construction with an unknown algorithm preserves its tag but processes with Test1. The silence threshold option only exists for AlgorithmTest4. Header-only Base64 decoding consumes six characters, independent of the body.
 - Add behavioral tests whenever runtime behavior changes; require 90% coverage for changed code, excluding scripts. Verify that regression tests fail with the corresponding fix disabled.
 - Never publish releases, tags, packages, or deployments without explicit user authorization.

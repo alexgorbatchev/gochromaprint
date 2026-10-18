@@ -94,11 +94,12 @@ func configForAlgorithm(algo Algorithm) (classifier.Config, error) {
 }
 
 // New creates and initializes a new chromaprint fingerprinting context.
+// Unknown algorithms retain their tag but use Test1 processing, matching native
+// chromaprint_new. Callers should normally select one of the Algorithm constants.
 func New(algo Algorithm) *Context {
 	cfg, err := configForAlgorithm(algo)
 	if err != nil {
-		cfg = classifier.NewConfigTest2()
-		algo = AlgorithmDefault
+		cfg = classifier.NewConfigTest1()
 	}
 
 	ctx := &Context{
@@ -190,14 +191,16 @@ func (c *Context) DelayMs() int {
 	return int(c.config.DelaySeconds() * 1000.0)
 }
 
-// SetOption sets a configuration option (such as "silence_threshold").
+// SetOption sets a configuration option. The "silence_threshold" option is
+// available only with AlgorithmTest4, which enables silence removal.
 func (c *Context) SetOption(name string, value int) error {
 	switch name {
 	case "silence_threshold":
-		c.config.SilenceThreshold = value
-		if c.silenceRemover != nil {
-			c.silenceRemover.SetThreshold(value)
+		if c.silenceRemover == nil {
+			return ErrUnknownOption
 		}
+		c.config.SilenceThreshold = value
+		c.silenceRemover.SetThreshold(value)
 		return nil
 	default:
 		return ErrUnknownOption
@@ -304,7 +307,7 @@ func DecodeFingerprint(encoded []byte, base64Decode bool) ([]uint32, Algorithm, 
 func DecodeFingerprintHeader(encoded []byte, base64Decode bool) (size int, algorithm Algorithm, err error) {
 	var payload []byte
 	if base64Decode {
-		limit := 8
+		limit := 6
 		if len(encoded) < limit {
 			limit = len(encoded)
 		}

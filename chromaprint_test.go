@@ -386,7 +386,7 @@ func TestDecodeFingerprintHeaders(t *testing.T) {
 	if _, _, err := gochromaprint.DecodeFingerprintHeader([]byte{1, 2}, false); err == nil {
 		t.Fatal("expected error for short header")
 	}
-	if _, _, err := gochromaprint.DecodeFingerprintHeader([]byte("invalid!!"), true); err == nil {
+	if _, _, err := gochromaprint.DecodeFingerprintHeader([]byte("!invalid"), true); err == nil {
 		t.Fatal("expected error for invalid base64")
 	}
 }
@@ -430,8 +430,100 @@ func TestContextLifecycleErrors(t *testing.T) {
 
 	// Unknown algorithm fallback
 	ctxFallback := gochromaprint.New(gochromaprint.Algorithm(999))
-	if ctxFallback.Algorithm() != gochromaprint.AlgorithmDefault {
-		t.Fatalf("expected default algorithm fallback, got %d", ctxFallback.Algorithm())
+	if ctxFallback.Algorithm() != 999 {
+		t.Fatalf("expected supplied algorithm tag, got %d", ctxFallback.Algorithm())
+	}
+}
+
+func TestUnknownAlgorithmNativeFallback(t *testing.T) {
+	data := loadAudioFile(t, "test_mono_11025.raw")
+	expected := gochromaprint.New(gochromaprint.AlgorithmTest1)
+	unknown := gochromaprint.New(gochromaprint.Algorithm(999))
+	for _, ctx := range []*gochromaprint.Context{expected, unknown} {
+		if err := ctx.Start(11025, 1); err != nil {
+			t.Fatal(err)
+		}
+		for range 3 {
+			if err := ctx.Feed(data); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := ctx.Finish(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want, err := expected.RawFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := unknown.RawFingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unknown algorithm did not use native Test1 processing")
+	}
+	encoded, err := unknown.Fingerprint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, tag, err := gochromaprint.DecodeFingerprint([]byte(encoded), true)
+	if err != nil || tag != 999&255 {
+		t.Fatalf("encoded algorithm %d, error %v", tag, err)
+	}
+}
+
+func TestSilenceOptionAvailability(t *testing.T) {
+	for algo := gochromaprint.AlgorithmTest1; algo <= gochromaprint.AlgorithmTest5; algo++ {
+		ctx := gochromaprint.New(algo)
+		before := ctx.Config().SilenceThreshold
+		err := ctx.SetOption("silence_threshold", 80)
+		if algo == gochromaprint.AlgorithmTest4 {
+			if err != nil || ctx.Config().SilenceThreshold != 80 {
+				t.Fatalf("silence option: %v", err)
+			}
+		} else if err != gochromaprint.ErrUnknownOption || ctx.Config().SilenceThreshold != before {
+			t.Fatalf("algorithm %d accepted unsupported option: %v", algo, err)
+		}
+	}
+}
+
+func TestSilenceOptionAffectsFingerprint(t *testing.T) {
+	data := loadAudioFile(t, "test_mono_11025.raw")
+	for _, threshold := range []int{0, 32768} {
+		ctx := gochromaprint.New(gochromaprint.AlgorithmTest4)
+		if err := ctx.SetOption("silence_threshold", threshold); err != nil {
+			t.Fatal(err)
+		}
+		if err := ctx.Start(11025, 1); err != nil {
+			t.Fatal(err)
+		}
+		for range 3 {
+			if err := ctx.Feed(data); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := ctx.Finish(); err != nil {
+			t.Fatal(err)
+		}
+		if got := ctx.RawFingerprintSize(); (got == 0) != (threshold == 32768) {
+			t.Fatalf("threshold %d yielded %d items", threshold, got)
+		}
+	}
+}
+
+func TestDecodeHeaderIgnoresBody(t *testing.T) {
+	encoded, err := gochromaprint.EncodeFingerprint([]uint32{1, 2, 3}, gochromaprint.AlgorithmDefault, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := append(append([]byte(nil), encoded[:6]...), []byte("!!invalid-body")...)
+	size, algo, err := gochromaprint.DecodeFingerprintHeader(input, true)
+	if err != nil || size != 3 || algo != gochromaprint.AlgorithmDefault {
+		t.Fatalf("header %d/%d: %v", size, algo, err)
+	}
+	if _, _, err := gochromaprint.DecodeFingerprint(input, true); err == nil {
+		t.Fatal("full decode accepted invalid body")
 	}
 }
 
