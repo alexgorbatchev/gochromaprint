@@ -1,12 +1,60 @@
 package gochromaprint_test
 
 import (
+	"context"
+	"errors"
 	"math"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/alexgorbatchev/gochromaprint"
 	"github.com/alexgorbatchev/gochromaprint/internal/classifier"
 )
+
+func TestMatchContextCancellation(t *testing.T) {
+	m := gochromaprint.NewMatcher(gochromaprint.New(gochromaprint.AlgorithmDefault).Config())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if segments, err := m.MatchContext(ctx, nil, nil); !errors.Is(err, context.Canceled) || segments != nil {
+		t.Fatalf("canceled match: %+v, %v", segments, err)
+	}
+
+	// All upper alignment bits coincide: native alignment would visit billions
+	// of pairs. Cancellation must interrupt that work, not only its entry point.
+	fp := make([]uint32, 80000)
+	for i := range fp {
+		fp[i] = uint32(i % 16)
+	}
+	ctx, cancel = context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	segments, err := m.MatchContext(ctx, fp, fp)
+	if !errors.Is(err, context.DeadlineExceeded) || segments != nil {
+		t.Fatalf("interrupted match: %+v, %v", segments, err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("cancellation took %s", elapsed)
+	} else {
+		t.Logf("deadline interrupted repeated-bucket matching in %s", elapsed)
+	}
+}
+
+func TestMatchContextPreservesResults(t *testing.T) {
+	m := gochromaprint.NewMatcher(gochromaprint.New(gochromaprint.AlgorithmDefault).Config())
+	fp := make([]uint32, 100)
+	for i := range fp {
+		fp[i] = uint32(i+1) << 20
+	}
+	want, err := m.Match(fp, fp[10:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := m.MatchContext(context.Background(), fp, fp[10:])
+	if err != nil || !reflect.DeepEqual(got, want) {
+		t.Fatalf("context match %+v, %v; want %+v", got, err, want)
+	}
+}
 
 func TestMatcherAlignmentTie(t *testing.T) {
 	pattern := make([]uint32, 50)

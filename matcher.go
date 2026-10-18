@@ -1,6 +1,7 @@
 package gochromaprint
 
 import (
+	"context"
 	"errors"
 	"math"
 	"sort"
@@ -12,6 +13,7 @@ import (
 const (
 	defaultMatchThreshold = 10.0
 	alignBits             = 12
+	matchCancelInterval   = 4096
 )
 
 var (
@@ -101,6 +103,16 @@ type alignment struct {
 
 // Match compares two fingerprints and returns matching segments.
 func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
+	return m.MatchContext(context.Background(), fp1, fp2)
+}
+
+// MatchContext compares fingerprints while observing cancellation during
+// alignment and scoring. Cancellation discards partial results and returns the
+// context error. Matching decisions are identical to Match when not canceled.
+func (m *Matcher) MatchContext(ctx context.Context, fp1, fp2 []uint32) ([]Segment, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	fp1Size := len(fp1)
 	fp2Size := len(fp2)
 
@@ -122,10 +134,16 @@ func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
 
 	offsets := make([]uint32, 0, fp1Size+fp2Size)
 	for i := 0; i < fp1Size; i++ {
+		if err := matchCanceled(ctx, i); err != nil {
+			return nil, err
+		}
 		key := ((fp1[i] >> (32 - alignBits)) << hashShift) | uint32(i)&offsetMask
 		offsets = append(offsets, key)
 	}
 	for i := 0; i < fp2Size; i++ {
+		if err := matchCanceled(ctx, i); err != nil {
+			return nil, err
+		}
 		key := ((fp2[i] >> (32 - alignBits)) << hashShift) | (uint32(i) & offsetMask) | sourceMask
 		offsets = append(offsets, key)
 	}
@@ -133,9 +151,15 @@ func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
 	sort.Slice(offsets, func(i, j int) bool {
 		return offsets[i] < offsets[j]
 	})
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	histogram := make([]uint32, fp1Size+fp2Size)
 	for it := 0; it < len(offsets); it++ {
+		if err := matchCanceled(ctx, it); err != nil {
+			return nil, err
+		}
 		hash := offsets[it] & hashMask
 		offset1 := offsets[it] & offsetMask
 		source1 := offsets[it] & sourceMask
@@ -144,6 +168,9 @@ func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
 		}
 
 		for it2 := it + 1; it2 < len(offsets); it2++ {
+			if err := matchCanceled(ctx, it2); err != nil {
+				return nil, err
+			}
 			hash2 := offsets[it2] & hashMask
 			if hash != hash2 {
 				break
@@ -162,6 +189,9 @@ func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
 	var bestAlignments []alignment
 	histLen := len(histogram)
 	for i := 0; i < histLen; i++ {
+		if err := matchCanceled(ctx, i); err != nil {
+			return nil, err
+		}
 		count := histogram[i]
 		if count > 1 {
 			isPeakLeft := (i == 0) || (histogram[i-1] <= count)
@@ -182,6 +212,9 @@ func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
 		}
 		return bestAlignments[i].count > bestAlignments[j].count
 	})
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	var segments []Segment
 
@@ -207,18 +240,30 @@ func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
 
 		bitCounts := make([]float64, size)
 		for i := 0; i < size; i++ {
+			if err := matchCanceled(ctx, i); err != nil {
+				return nil, err
+			}
 			bitCounts[i] = float64(HammingDistance(fp1[offset1+i], fp2[offset2+i]))
 		}
 
 		origBitCounts := append([]float64(nil), bitCounts...)
 		smoothedBitCounts := filter.GaussianFilter(bitCounts, 8.0, 3)
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		grad := filter.Gradient(smoothedBitCounts)
 		for i := range grad {
+			if err := matchCanceled(ctx, i); err != nil {
+				return nil, err
+			}
 			grad[i] = math.Abs(grad[i])
 		}
 
 		var gradientPeaks []int
 		for i := 0; i < size; i++ {
+			if err := matchCanceled(ctx, i); err != nil {
+				return nil, err
+			}
 			gi := grad[i]
 			if i > 0 && i < size-1 && gi > 0.15 && gi >= grad[i-1] && gi >= grad[i+1] {
 				if len(gradientPeaks) == 0 || gradientPeaks[len(gradientPeaks)-1]+1 < i {
@@ -237,6 +282,9 @@ func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
 
 			var sum float64
 			for j := begin; j < end; j++ {
+				if err := matchCanceled(ctx, j); err != nil {
+					return nil, err
+				}
 				sum += origBitCounts[j]
 			}
 			score := sum / float64(duration)
@@ -274,5 +322,15 @@ func (m *Matcher) Match(fp1, fp2 []uint32) ([]Segment, error) {
 		break
 	}
 
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return segments, nil
+}
+
+func matchCanceled(ctx context.Context, index int) error {
+	if index%matchCancelInterval == 0 {
+		return ctx.Err()
+	}
+	return nil
 }

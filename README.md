@@ -173,6 +173,8 @@ fpcalc -upgrade
 
 `Segment.Score` measures average differing bits per subfingerprint (0–32); lower is closer. `PublicScore()` scales that error score by 100 and is not a similarity percentage. Like upstream, the matcher may combine similar-scoring segments across a rejected interval; a returned segment's duration does not establish uninterrupted agreement across its extent.
 
+Use `matcher.MatchContext(ctx, fp1, fp2)` for cancellable scans. Cancellation returns `ctx.Err()` and discards partial results. `Match(fp1, fp2)` performs the same comparison without cancellation. Repetitive fingerprints can require quadratic alignment work; callers can set a context deadline to bound that work.
+
 ---
 
 ## License
