@@ -20,3 +20,7 @@ lint:
 # Clean build artifacts
 clean:
     rm -rf bin/
+
+# Download project dependencies for local development
+setup:
+    go mod download
